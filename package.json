@@ -1,0 +1,34 @@
+{
+  "name": "releasewatcher",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Watches GitHub repositories for new releases and notifies Discord (and other channels).",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node scripts/ensure-web.ts && node --disable-warning=ExperimentalWarning src/main.ts",
+    "serve": "node --disable-warning=ExperimentalWarning src/main.ts",
+    "dev": "concurrently --kill-others-on-fail --names api,web --prefix-colors blue,magenta \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "node --disable-warning=ExperimentalWarning --watch src/main.ts",
+    "dev:web": "npm start --workspace web",
+    "build": "node scripts/ensure-web.ts --force",
+    "test": "npm run test:api && npm run test:web",
+    "test:api": "node --disable-warning=ExperimentalWarning --test \"test/**/*.test.ts\"",
+    "test:web": "npm test --workspace web -- --watch=false",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fastify/static": "^10.1.11",
+    "fastify": "^5.12.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "concurrently": "^10.0.6",
+    "typescript": "^5.9.3"
+  },
+  "workspaces": [
+    "web"
+  ]
+}

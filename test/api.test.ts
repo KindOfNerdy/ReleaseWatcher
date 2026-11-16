@@ -1,0 +1,204 @@
+import assert from 'node:assert/strict';
+import { afterEach, beforeEach, describe, it } from 'node:test';
+import { buildApp, type App } from '../src/app.ts';
+import { RepositoryStore } from '../src/db.ts';
+import { loadConfig } from '../src/config.ts';
+import { SettingsService } from '../src/settings.ts';
+import { FakeSource, RecordingNotifier, release } from './helpers.ts';
+
+describe('HTTP API', () => {
+  let app: App;
+  let source: FakeSource;
+  let notifier: RecordingNotifier;
+  let lastHeaders: readonly { name: string; value: string }[] = [];
+
+  beforeEach(async () => {
+    source = new FakeSource();
+    source.releases = [release('v1', 1)];
+    notifier = new RecordingNotifier();
+    const store = new RepositoryStore(':memory:');
+    const settings = new SettingsService(store, loadConfig({ POLL_INTERVAL_MINUTES: '15' }));
+    app = await buildApp({
+      store,
+      settings,
+      source,
+      notifiers: [notifier],
+      logger: false,
+      fetchInstalledVersion: async (url, _field, headers) => {
+        lastHeaders = headers;
+        if (url.includes('down')) {
+          const { InstalledVersionError } = await import('../src/version.ts');
+          throw new InstalledVersionError('Could not reach it');
+        }
+        return { version: '0.9.0', preview: '"0.9.0"' };
+      },
+    });
+  });
+
+  afterEach(() => app.server.close());
+
+  const add = (repository: string) =>
+    app.server.inject({ method: 'POST', url: '/api/repositories', payload: { repository } });
+
+  it('adds a repository and establishes the baseline', async () => {
+    const response = await add('https://github.com/acme/widget');
+    assert.equal(response.statusCode, 201);
+    const body = response.json();
+    assert.equal(body.fullName, 'acme/widget');
+    assert.equal(body.avatarUrl, 'https://avatars.githubusercontent.com/acme?s=64');
+    assert.equal(body.lastSeenTag, 'v1');
+    assert.equal('etag' in body, false);
+    assert.equal(notifier.sent.length, 0);
+  });
+
+  it('rejects duplicates case-insensitively', async () => {
+    await add('acme/widget');
+    const response = await add('ACME/Widget');
+    assert.equal(response.statusCode, 409);
+  });
+
+  it('validates the repository name and existence', async () => {
+    assert.equal((await add('not a repo')).json().errors.repository.length, 1);
+    const missing = await add('acme/missing');
+    assert.equal(missing.statusCode, 400);
+    assert.match(missing.json().errors.repository[0], /not found/);
+  });
+
+  it('updates, checks and deletes a repository', async () => {
+    const { id } = (await add('acme/widget')).json();
+
+    const updated = await app.server.inject({
+      method: 'PUT',
+      url: `/api/repositories/${id}`,
+      payload: { includePrereleases: true, isEnabled: false },
+    });
+    assert.equal(updated.json().isEnabled, false);
+
+    source.releases = [release('v2', 2), release('v1', 1)];
+    const check = await app.server.inject({ method: 'POST', url: `/api/repositories/${id}/check` });
+    assert.equal(check.json().notifiedCount, 1);
+
+    assert.equal((await app.server.inject({ method: 'DELETE', url: `/api/repositories/${id}` })).statusCode, 204);
+    assert.equal((await app.server.inject({ method: 'DELETE', url: `/api/repositories/${id}` })).statusCode, 404);
+  });
+
+  it('lists notifiers and sends a test notification', async () => {
+    assert.deepEqual((await app.server.inject('/api/notifiers')).json(), [{ name: 'recording', isEnabled: true }]);
+    const test = await app.server.inject({ method: 'POST', url: '/api/notifiers/test' });
+    assert.deepEqual(test.json(), { sent: ['recording'], failed: [] });
+  });
+
+  it('reads and updates settings, masking secrets', async () => {
+    const initial = (await app.server.inject('/api/settings')).json();
+    assert.equal(initial.discord.webhookConfigured, false);
+    assert.equal(initial.polling.intervalMinutes, 15);
+    assert.equal(initial.polling.intervalSource, 'env');
+
+    const webhook = 'https://discord.com/api/webhooks/123456789/secret-token-value';
+    const updated = await app.server.inject({
+      method: 'PUT',
+      url: '/api/settings',
+      payload: { discordWebhookUrl: webhook, githubToken: 'ghp_abcdefghijklmnop', pollIntervalMinutes: 5 },
+    });
+    assert.equal(updated.statusCode, 200);
+    const body = updated.json();
+    assert.equal(body.discord.webhookConfigured, true);
+    assert.equal(body.discord.webhookSource, 'ui');
+    assert.ok(!JSON.stringify(body).includes('secret-token-value'));
+    assert.ok(!JSON.stringify(body).includes('ghp_abcdefghijklmnop'));
+    assert.equal(body.polling.intervalMinutes, 5);
+
+    const cleared = await app.server.inject({ method: 'PUT', url: '/api/settings', payload: { pollIntervalMinutes: null } });
+    assert.equal(cleared.json().polling.intervalMinutes, 15);
+  });
+
+  it('validates settings', async () => {
+    const badUrl = await app.server.inject({ method: 'PUT', url: '/api/settings', payload: { discordWebhookUrl: 'nope' } });
+    assert.equal(badUrl.statusCode, 400);
+    assert.ok(badUrl.json().errors.discordWebhookUrl);
+
+    const badInterval = await app.server.inject({ method: 'PUT', url: '/api/settings', payload: { pollIntervalMinutes: 0 } });
+    assert.ok(badInterval.json().errors.pollIntervalMinutes);
+  });
+
+  it('reports status and runs a check of all repositories', async () => {
+    await add('acme/widget');
+    source.releases = [release('v2', 2), release('v1', 1)];
+    const status = (await app.server.inject({ method: 'POST', url: '/api/check-all' })).json();
+    assert.equal(status.repositories.total, 1);
+    assert.ok(status.poller.lastRunFinishedAt);
+    assert.equal(notifier.sent.length, 1);
+  });
+
+  it('configures an installed-version URL and reports available updates', async () => {
+    const { id } = (await add('acme/widget')).json();
+
+    const invalid = await app.server.inject({
+      method: 'PUT',
+      url: `/api/repositories/${id}`,
+      payload: { includePrereleases: false, isEnabled: true, installedVersionUrl: 'not a url' },
+    });
+    assert.equal(invalid.statusCode, 400);
+
+    const updated = await app.server.inject({
+      method: 'PUT',
+      url: `/api/repositories/${id}`,
+      payload: { includePrereleases: false, isEnabled: true, installedVersionUrl: 'https://widget.lan/api/version' },
+    });
+    const body = updated.json();
+    assert.equal(body.installedVersion, '0.9.0');
+    assert.equal(body.updateAvailable, true); // latest release is v1
+
+    const status = (await app.server.inject('/api/status')).json();
+    assert.equal(status.repositories.updatesAvailable, 1);
+
+    // Omitting the fields keeps them.
+    const kept = await app.server.inject({
+      method: 'PUT',
+      url: `/api/repositories/${id}`,
+      payload: { includePrereleases: true, isEnabled: true },
+    });
+    assert.equal(kept.json().installedVersionUrl, 'https://widget.lan/api/version');
+  });
+
+  it('tests an installed-version URL without saving it', async () => {
+    const ok = await app.server.inject({ method: 'POST', url: '/api/installed-version/test', payload: { url: 'https://a.lan/v' } });
+    assert.deepEqual(ok.json(), { version: '0.9.0', preview: '"0.9.0"' });
+
+    const down = await app.server.inject({ method: 'POST', url: '/api/installed-version/test', payload: { url: 'https://down.lan/v' } });
+    assert.equal(down.statusCode, 422);
+    assert.match(down.json().title, /Could not reach/);
+  });
+
+  it('stores headers without ever returning their values', async () => {
+    const { id } = (await add('acme/widget')).json();
+    const put = (payload: object) =>
+      app.server.inject({ method: 'PUT', url: `/api/repositories/${id}`, payload: { includePrereleases: false, isEnabled: true, ...payload } });
+
+    const saved = await put({
+      installedVersionUrl: 'https://widget.lan/api/version',
+      installedVersionHeaders: [{ name: 'Authorization', value: 'Bearer s3cret' }],
+    });
+    assert.equal(saved.statusCode, 200);
+    assert.deepEqual(saved.json().installedVersionHeaders, [{ name: 'Authorization', hasValue: true }]);
+    assert.ok(!saved.body.includes('s3cret'));
+    assert.deepEqual(lastHeaders, [{ name: 'Authorization', value: 'Bearer s3cret' }]);
+
+    // Re-sending the header without a value keeps the stored secret; a new header needs a value.
+    await put({ installedVersionHeaders: [{ name: 'Authorization' }, { name: 'X-Extra', value: '1' }] });
+    const test = await app.server.inject({
+      method: 'POST',
+      url: '/api/installed-version/test',
+      payload: { url: 'https://widget.lan/api/version', headers: [{ name: 'Authorization' }], repositoryId: id },
+    });
+    assert.equal(test.statusCode, 200);
+    assert.deepEqual(lastHeaders, [{ name: 'Authorization', value: 'Bearer s3cret' }]);
+
+    const missing = await put({ installedVersionHeaders: [{ name: 'X-New' }] });
+    assert.equal(missing.statusCode, 400);
+    assert.match(missing.json().errors.installedVersionHeaders[0], /value/);
+
+    const cleared = await put({ installedVersionHeaders: [] });
+    assert.deepEqual(cleared.json().installedVersionHeaders, []);
+  });
+});

@@ -1,0 +1,20 @@
+node_modules/
+web/.angular/
+web/dist/
+
+# Angular build output is served by the server
+/public/
+
+# SQLite database
+*.db
+*.db-shm
+*.db-wal
+
+# Local secrets
+.env
+
+# IDE / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store

@@ -1,0 +1,192 @@
+<header class="page-header">
+  <div>
+    <h1>Repositories</h1>
+    <p>GitHub repositories watched for new releases.</p>
+  </div>
+</header>
+
+@if (!loading() && !hasEnabledNotifier()) {
+  <div class="callout">
+    <app-icon name="alert" />
+    <div>
+      <strong>No notification channel configured.</strong>
+      New releases will be detected but not sent anywhere.
+      <a routerLink="/settings">Add a Discord webhook in Settings</a>.
+    </div>
+  </div>
+}
+
+<form class="card add-card" (ngSubmit)="add()">
+  <div class="add-input">
+    <app-icon name="github" class="add-icon" />
+    <label for="new-repo" class="visually-hidden">Repository</label>
+    <input
+      id="new-repo"
+      class="input"
+      name="repository"
+      [(ngModel)]="newRepository"
+      placeholder="owner/repo or https://github.com/owner/repo"
+      autocomplete="off"
+      spellcheck="false"
+      required
+    />
+  </div>
+  <app-switch
+    label="Include pre-releases"
+    [checked]="newIncludePrereleases"
+    (toggled)="newIncludePrereleases = !newIncludePrereleases"
+  />
+  <button type="submit" class="btn" [disabled]="adding() || !newRepository.trim()">
+    <app-icon name="plus" [size]="16" />
+    {{ adding() ? 'Adding…' : 'Watch' }}
+  </button>
+</form>
+
+<div class="toolbar">
+  <div class="tabs" role="tablist" aria-label="Filter repositories">
+    @for (f of filters; track f.value) {
+      <button
+        type="button"
+        role="tab"
+        class="tab"
+        [class.active]="filter() === f.value"
+        [attr.aria-selected]="filter() === f.value"
+        (click)="filter.set(f.value)"
+      >
+        {{ f.label }}
+        <span class="tab-count" [class.danger]="f.value === 'errors' && counts().errors > 0">{{ counts()[f.value] }}</span>
+      </button>
+    }
+  </div>
+  <div class="toolbar-right">
+  <div class="layout-toggle" role="radiogroup" aria-label="Layout">
+    <button type="button" role="radio" class="icon-btn" title="List" aria-label="List view"
+      [class.active]="preferences.repositoryLayout() === 'list'" [attr.aria-checked]="preferences.repositoryLayout() === 'list'"
+      (click)="preferences.repositoryLayout.set('list')">
+      <app-icon name="list" [size]="16" />
+    </button>
+    <button type="button" role="radio" class="icon-btn" title="Grid" aria-label="Grid view"
+      [class.active]="preferences.repositoryLayout() === 'grid'" [attr.aria-checked]="preferences.repositoryLayout() === 'grid'"
+      (click)="preferences.repositoryLayout.set('grid')">
+      <app-icon name="grid" [size]="16" />
+    </button>
+  </div>
+  <div class="search">
+    <app-icon name="search" [size]="16" />
+    <label for="search" class="visually-hidden">Search</label>
+    <input id="search" class="input" type="search" placeholder="Search" [value]="query()" (input)="query.set($any($event.target).value)" />
+  </div>
+  </div>
+</div>
+
+@if (loading()) {
+  <div class="list" [class.grid]="preferences.repositoryLayout() === 'grid'">
+    @for (i of [1, 2, 3]; track i) {
+      <div class="card row skeleton"></div>
+    }
+  </div>
+} @else if (repositories().length === 0) {
+  <div class="card empty">
+    <span class="empty-icon"><app-icon name="repo" [size]="22" /></span>
+    <h2>No repositories yet</h2>
+    <p>Add one above, e.g. <code>angular/angular</code> or <code>nodejs/node</code>.</p>
+  </div>
+} @else if (visible().length === 0) {
+  <div class="card empty">
+    <h2>Nothing matches</h2>
+    <p>Try a different search or filter.</p>
+  </div>
+} @else {
+  <ul class="list" [class.grid]="preferences.repositoryLayout() === 'grid'">
+    @for (repo of visible(); track repo.id) {
+      <li class="card row" [class.paused]="!repo.isEnabled" [class.has-error]="!!repo.lastError">
+        <app-avatar class="avatar" [src]="repo.avatarUrl" [name]="repo.owner" [size]="40" />
+        <div class="main">
+          <div class="title-line">
+            <a [href]="repo.url" target="_blank" rel="noopener" class="name">
+              <span class="owner">{{ repo.owner }}/</span>{{ repo.name }}
+            </a>
+            @if (!repo.isEnabled) {
+              <span class="badge">Paused</span>
+            }
+            @if (repo.includePrereleases) {
+              <span class="badge badge-accent">Pre-releases</span>
+            }
+            @if (repo.updateAvailable === true) {
+              <span class="badge badge-warning" [title]="'Installed ' + repo.installedVersion + ', latest ' + repo.lastSeenTag">
+                <app-icon name="arrowUp" [size]="12" /> Update available
+              </span>
+            } @else if (repo.updateAvailable === false) {
+              <span class="badge badge-success"><app-icon name="check" [size]="12" /> Up to date</span>
+            }
+          </div>
+          <div class="meta">
+            <span class="meta-item" title="Latest release">
+              <app-icon name="tag" [size]="14" />
+              @if (repo.lastSeenTag) {
+                <a [href]="repo.url + '/releases/tag/' + repo.lastSeenTag" target="_blank" rel="noopener" class="mono">{{ repo.lastSeenTag }}</a>
+              } @else {
+                <span>No releases yet</span>
+              }
+            </span>
+            @if (repo.lastSeenPublishedAt) {
+              <span class="meta-item" [title]="repo.lastSeenPublishedAt | date: 'medium'">
+                released {{ repo.lastSeenPublishedAt | relativeTime }}
+              </span>
+            }
+            @if (repo.installedVersion) {
+              <span class="meta-item installed" [title]="'Read from ' + repo.installedVersionUrl">
+                <app-icon name="server" [size]="14" />
+                installed <span class="mono">{{ repo.installedVersion }}</span>
+                @if (repo.updateAvailable) {
+                  <span class="arrow">→</span> <span class="mono">{{ repo.lastSeenTag }}</span>
+                }
+              </span>
+            }
+            <span class="meta-item" [title]="repo.lastCheckedAt ? (repo.lastCheckedAt | date: 'medium') : 'Never checked'">
+              <app-icon name="clock" [size]="14" />
+              checked {{ repo.lastCheckedAt ? (repo.lastCheckedAt | relativeTime) : 'never' }}
+            </span>
+          </div>
+          @if (repo.lastError) {
+            <div class="error-line">
+              <app-icon name="alert" [size]="14" />
+              <span>{{ repo.lastError }}</span>
+            </div>
+          }
+          @if (repo.installedVersionError) {
+            <div class="error-line warn">
+              <app-icon name="server" [size]="14" />
+              <span>Installed version: {{ repo.installedVersionError }}</span>
+            </div>
+          }
+        </div>
+
+        <div class="controls">
+          <app-switch label="Pre-releases" [checked]="repo.includePrereleases" [disabled]="isBusy(repo.id)" (toggled)="toggle(repo, 'includePrereleases')" />
+          <app-switch label="Active" [checked]="repo.isEnabled" [disabled]="isBusy(repo.id)" (toggled)="toggle(repo, 'isEnabled')" />
+          <div class="actions">
+            @if (confirmDeleteId() === repo.id) {
+              <span class="confirm-text">Remove?</span>
+              <button type="button" class="btn btn-sm btn-danger-ghost" (click)="remove(repo)">Yes</button>
+              <button type="button" class="btn btn-sm btn-ghost" (click)="confirmDeleteId.set(null)">No</button>
+            } @else {
+              <button type="button" class="btn btn-sm btn-secondary" (click)="checkNow(repo)" [disabled]="isBusy(repo.id)">
+                <app-icon name="refresh" [size]="14" [class.spin]="isBusy(repo.id)" />
+                Check
+              </button>
+              <button type="button" class="icon-btn" (click)="editing.set(repo)" [disabled]="isBusy(repo.id)" [attr.aria-label]="'Settings of ' + repo.fullName" title="Settings">
+                <app-icon name="sliders" [size]="16" />
+              </button>
+              <button type="button" class="icon-btn" (click)="confirmDeleteId.set(repo.id)" [disabled]="isBusy(repo.id)" [attr.aria-label]="'Remove ' + repo.fullName" title="Remove">
+                <app-icon name="trash" [size]="16" />
+              </button>
+            }
+          </div>
+        </div>
+      </li>
+    }
+  </ul>
+}
+
+<app-repository-settings-dialog [repository]="editing()" (saved)="onSettingsSaved($event)" (closed)="editing.set(null)" />

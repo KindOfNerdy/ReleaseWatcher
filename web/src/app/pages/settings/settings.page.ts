@@ -1,0 +1,173 @@
+import { DecimalPipe } from '@angular/common';
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { firstValueFrom } from 'rxjs';
+import { ApiService } from '../../core/api.service';
+import { AppSettings, RateLimit, SettingSource, SettingsPatch } from '../../core/models';
+import { StatusService } from '../../core/status.service';
+import { ToastService } from '../../core/toast.service';
+import { Icon } from '../../shared/icon';
+import { RelativeTimePipe } from '../../shared/relative-time.pipe';
+
+type Section = 'discord' | 'github' | 'polling';
+
+const INTERVAL_PRESETS = [5, 15, 30, 60, 180, 360, 1440];
+
+@Component({
+  selector: 'app-settings-page',
+  imports: [FormsModule, DecimalPipe, Icon, RelativeTimePipe],
+  templateUrl: './settings.page.html',
+  styleUrl: './settings.page.scss',
+})
+export class SettingsPage implements OnInit {
+  private readonly api = inject(ApiService);
+  private readonly toast = inject(ToastService);
+  private readonly statusService = inject(StatusService);
+
+  protected readonly settings = signal<AppSettings | null>(null);
+  protected readonly saving = signal<Section | null>(null);
+  protected readonly errors = signal<Record<string, string>>({});
+  protected readonly testing = signal(false);
+  protected readonly rateLimit = signal<RateLimit | null>(null);
+  protected readonly rateLimitError = signal<string | null>(null);
+  protected readonly loadingRateLimit = signal(false);
+  protected readonly showWebhook = signal(false);
+  protected readonly showToken = signal(false);
+
+  // Form state. Secrets start empty: an empty field on save means "keep the current value".
+  protected webhookUrl = '';
+  protected mention = '';
+  protected username = '';
+  protected token = '';
+  protected intervalMinutes = 15;
+
+  protected readonly presets = INTERVAL_PRESETS;
+
+  protected readonly rateLimitPercent = computed(() => {
+    const rl = this.rateLimit();
+    return rl && rl.limit > 0 ? Math.round((rl.remaining / rl.limit) * 100) : 0;
+  });
+
+  async ngOnInit(): Promise<void> {
+    try {
+      this.apply(await firstValueFrom(this.api.getSettings()));
+    } catch (error) {
+      this.toast.error(error);
+    }
+    void this.loadRateLimit();
+  }
+
+  protected async saveDiscord(): Promise<void> {
+    const patch: SettingsPatch = {
+      discordMention: this.mention,
+      discordUsername: this.username,
+    };
+    if (this.webhookUrl.trim()) {
+      patch.discordWebhookUrl = this.webhookUrl.trim();
+    }
+    await this.save('discord', patch, 'Discord settings saved.');
+  }
+
+  protected async resetWebhook(): Promise<void> {
+    await this.save('discord', { discordWebhookUrl: null }, 'Webhook removed.');
+  }
+
+  protected async saveGitHub(): Promise<void> {
+    if (!this.token.trim()) {
+      return;
+    }
+    if (await this.save('github', { githubToken: this.token.trim() }, 'GitHub token saved.')) {
+      void this.loadRateLimit();
+    }
+  }
+
+  protected async resetToken(): Promise<void> {
+    if (await this.save('github', { githubToken: null }, 'GitHub token removed.')) {
+      void this.loadRateLimit();
+    }
+  }
+
+  protected async savePolling(): Promise<void> {
+    if (await this.save('polling', { pollIntervalMinutes: Number(this.intervalMinutes) }, 'Polling interval saved.')) {
+      void this.statusService.refresh();
+    }
+  }
+
+  protected async sendTest(): Promise<void> {
+    this.testing.set(true);
+    try {
+      const result = await firstValueFrom(this.api.sendTestNotification());
+      if (result.failed.length > 0) {
+        this.toast.error(`Sending failed via ${result.failed.join(', ')}. Check the webhook URL and server logs.`);
+      } else if (result.sent.length === 0) {
+        this.toast.error('No notification channel is configured.');
+      } else {
+        this.toast.success(`Test notification sent via ${result.sent.join(', ')}.`);
+      }
+    } catch (error) {
+      this.toast.error(error);
+    } finally {
+      this.testing.set(false);
+    }
+  }
+
+  protected async loadRateLimit(): Promise<void> {
+    this.loadingRateLimit.set(true);
+    try {
+      this.rateLimit.set(await firstValueFrom(this.api.getRateLimit()));
+      this.rateLimitError.set(null);
+    } catch {
+      this.rateLimitError.set('Could not reach the GitHub API.');
+    } finally {
+      this.loadingRateLimit.set(false);
+    }
+  }
+
+  protected sourceLabel(source: SettingSource): string {
+    return source === 'ui' ? 'Saved here' : source === 'env' ? 'From environment' : 'Not set';
+  }
+
+  protected formatInterval(minutes: number): string {
+    if (minutes % 1440 === 0) {
+      return minutes === 1440 ? '1 day' : `${minutes / 1440} days`;
+    }
+    if (minutes % 60 === 0) {
+      return minutes === 60 ? '1 hour' : `${minutes / 60} hours`;
+    }
+    return `${minutes} min`;
+  }
+
+  protected checksPerHour(): number {
+    const minutes = Number(this.intervalMinutes) || 1;
+    return Math.ceil(60 / minutes);
+  }
+
+  private async save(section: Section, patch: SettingsPatch, successText: string): Promise<boolean> {
+    this.saving.set(section);
+    this.errors.set({});
+    try {
+      this.apply(await firstValueFrom(this.api.updateSettings(patch)));
+      this.toast.success(successText);
+      return true;
+    } catch (error) {
+      const fieldErrors = (error as { error?: { errors?: Record<string, string[]> } })?.error?.errors;
+      if (fieldErrors) {
+        this.errors.set(Object.fromEntries(Object.entries(fieldErrors).map(([k, v]) => [k, v.join(' ')])));
+      } else {
+        this.toast.error(error);
+      }
+      return false;
+    } finally {
+      this.saving.set(null);
+    }
+  }
+
+  private apply(settings: AppSettings): void {
+    this.settings.set(settings);
+    this.webhookUrl = '';
+    this.token = '';
+    this.mention = settings.discord.mention ?? '';
+    this.username = settings.discord.username ?? '';
+    this.intervalMinutes = settings.polling.intervalMinutes;
+  }
+}

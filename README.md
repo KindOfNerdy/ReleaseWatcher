@@ -1,0 +1,156 @@
+# ReleaseWatcher
+
+Watches selected GitHub repositories for new releases and sends a notification (Discord today, more channels later).
+
+- **Server:** Node.js 22.18+ / 24 running TypeScript natively (no build step), Fastify, built-in `node:sqlite`
+- **UI:** Angular 22 (standalone, signals, zoneless), served by the server from `public/`
+- **Notifications:** Discord webhook; new channels plug in through the `Notifier` interface
+- Only two runtime dependencies: `fastify` and `@fastify/static`
+
+## How it works
+
+1. You add a repository (`owner/repo` or a GitHub URL) in the UI or via the API.
+2. The first check only stores a **baseline** (the newest existing release), so you are not spammed with history.
+3. Every `POLL_INTERVAL_MINUTES` (default 15) the poller fetches recent releases using conditional requests
+   (`If-None-Match`/ETag; a `304` does not count against GitHub's rate limit).
+4. Releases newer than the baseline are sent to every enabled notifier (oldest first, max 5 per check),
+   then the baseline moves forward. Drafts are ignored; pre-releases are opt-in per repository.
+
+## Quick start (Docker)
+
+```bash
+cp .env.example .env        # paste your Discord webhook URL (and optionally a GitHub token)
+docker compose up -d --build
+```
+
+Open http://localhost:8080. The SQLite database lives in the `releasewatcher-data` volume.
+
+## Local development
+
+Requirements: Node.js 22.18+ (24 LTS recommended). The server and the Angular UI are one npm
+workspace, so a single `npm install` in the repository root installs both.
+
+```bash
+cp .env.example .env        # fill in DISCORD_WEBHOOK_URL (or set it later in the UI)
+npm install
+npm start                   # builds the UI if needed, then serves app + API on http://localhost:8080
+```
+
+`npm start` rebuilds the UI only when `web/` changed since the last build, so later starts are instant.
+
+For development with live reload:
+
+```bash
+npm run dev                 # API on :8080 (restarts on change) + Angular dev server on http://localhost:4200
+```
+
+Open http://localhost:4200; the Angular dev server proxies `/api` to the API on :8080 (`web/proxy.conf.json`,
+adjust it if you change `PORT`).
+
+| Script              | What it does                                              |
+| ------------------- | --------------------------------------------------------- |
+| `npm start`         | build the UI if it is missing or outdated, start the app  |
+| `npm run dev`       | API in watch mode + Angular dev server, side by side      |
+| `npm run build`     | force a production build of the UI into `public/`         |
+| `npm run serve`     | start the app without touching the UI build               |
+| `npm test`          | server tests (node:test) + UI tests (Vitest)              |
+| `npm run typecheck` | type-check the server                                     |
+
+## UI
+
+- **Repositories** – add/remove repositories, filter (active, paused, errors), search, toggle pre-releases
+  and pausing per repository, check a single repository on demand.
+- **List or grid** layout for repositories (toggle in the Repositories toolbar; remembered per browser).
+- Each repository shows its owner's GitHub avatar (also used as the author icon in Discord messages).
+- **Repository settings** (sliders icon) – optional **installed version URL** of your self-hosted instance,
+  e.g. Vaultwarden's `https://vault.lan/api/version`. The version is read on every check (plain text, a JSON
+  string, common keys like `version`, or an explicit JSON dot path such as `data.version`). You then see
+  *Update available 1.31.0 → 1.32.0* / *Up to date*, Discord messages include the installed version, and
+  releases you already run (installed ≥ release) are not announced. A **Test URL** button previews the result.
+  Optional **request headers** (e.g. `Authorization: Bearer …`, `X-Api-Key`) are sent with the request; their
+  values are stored in SQLite and never returned by the API (the UI only sees header names).
+- **Settings** – Discord webhook, mention and bot name (with a test message), GitHub token with live API quota,
+  polling interval. Changes apply immediately; values saved in the UI are stored in SQLite and override
+  the environment variables below (clearing a value falls back to the environment).
+- The sidebar shows when the next check runs and has a **Check all now** button.
+
+## Configuration (environment variables / `.env`)
+
+| Variable | Default | Description |
+|---|---|---|
+| `DISCORD_WEBHOOK_URL` | – | Discord channel webhook. Empty = Discord disabled. |
+| `DISCORD_MENTION` | – | Text above the embed, e.g. `@here` or `<@&ROLE_ID>`. |
+| `DISCORD_USERNAME` | `ReleaseWatcher` | Display name of the webhook. |
+| `DISCORD_AVATAR_URL` | – | Avatar of the webhook. |
+| `DISCORD_MAX_BODY_LENGTH` | `1500` | Release notes are truncated to this length. |
+| `GITHUB_TOKEN` | – | Optional PAT. Raises the limit from 60 to 5000 requests/hour; needed for private repos. |
+| `POLL_INTERVAL_MINUTES` | `15` | Time between checks. |
+| `POLL_INITIAL_DELAY_SECONDS` | `10` | Delay before the first check after start. |
+| `DATABASE_PATH` | `releasewatcher.db` | SQLite file. |
+| `PORT` / `HOST` | `8080` / `0.0.0.0` | HTTP binding. |
+| `LOG_LEVEL` | `info` | Pino log level. |
+
+> Without a token GitHub allows 60 requests/hour per IP. Each repository costs one request per check
+> (fewer with ETag hits), so for more than ~10 repositories at a 15 min interval add a token.
+
+## API
+
+| Method | Route | Description |
+|---|---|---|
+| `GET` | `/api/repositories` | List watched repositories |
+| `POST` | `/api/repositories` | `{ "repository": "owner/repo", "includePrereleases": false }` |
+| `PUT` | `/api/repositories/:id` | `{ "includePrereleases": true, "isEnabled": true, "installedVersionUrl"?: "https://…", "installedVersionField"?: "data.version", "installedVersionHeaders"?: [{ "name": "Authorization", "value": "Bearer …" }] }` – a header with `value: null` keeps the saved value |
+| `POST` | `/api/installed-version/test` | `{ "url": "https://…", "field": null, "headers": [], "repositoryId"?: 1 }` → detected version and response preview |
+| `DELETE` | `/api/repositories/:id` | Stop watching |
+| `POST` | `/api/repositories/:id/check` | Check immediately |
+| `GET` | `/api/notifiers` | Registered notifiers and whether they are configured |
+| `POST` | `/api/notifiers/test` | Send a fake release to all enabled notifiers |
+| `GET` | `/api/settings` | Effective settings (secrets masked) and where each value comes from |
+| `PUT` | `/api/settings` | Partial update; `null` resets a value to the environment default |
+| `GET` | `/api/status` | Poller state (next/last run) and repository counts |
+| `POST` | `/api/check-all` | Check all active repositories now |
+| `GET` | `/api/github/rate-limit` | Remaining GitHub API quota |
+| `GET` | `/health` | Liveness |
+
+## Adding a new notifier (e.g. Slack, Teams, e-mail)
+
+1. Implement `Notifier` from `src/notifiers/notifier.ts` (`name`, `isEnabled`, `notify()`).
+2. Register it in `src/notifiers/index.ts`:
+
+```ts
+export function createNotifiers(config: Config): Notifier[] {
+  return [new DiscordNotifier(config.discord), new SlackNotifier(config.slack)];
+}
+```
+
+`NotificationDispatcher` sends every release to all enabled notifiers; a failure in one channel
+does not block the others. The UI picks up the new channel automatically.
+
+## Project layout
+
+```
+src/
+  main.ts            entry point: config, DB, HTTP server, poller, graceful shutdown
+  app.ts             Fastify routes + static UI
+  domain.ts          types, repository-name parsing, new-release selection
+  db.ts              node:sqlite store with simple versioned migrations
+  github.ts          GitHub REST client (ETag aware)
+  checker.ts         checks one/all repositories, dispatches notifications
+  poller.ts          interval scheduler (interval can change at runtime)
+  settings.ts        UI-editable settings stored in SQLite, falling back to env vars
+  version.ts         version parsing/comparison, reading the installed version of a self-hosted app
+  notifiers/         Notifier interface, dispatcher, Discord
+test/                node:test tests
+scripts/             ensure-web.ts: builds the UI for `npm start` when needed
+web/                 Angular UI (builds into public/)
+  src/app/app.*              shell: sidebar, poller status, toasts
+  src/app/pages/repositories watched repositories
+  src/app/pages/settings     Discord, GitHub, polling settings
+```
+
+## Security note
+
+The server fetches the installed-version URLs you configure (usually LAN addresses) – keep the UI private.
+Header values (API keys, tokens) are stored in plain text in the SQLite file – protect the data volume.
+The API has no authentication. Run it on a private network or behind a reverse proxy with auth
+(e.g. Cloudflare Access, Authelia, basic auth in nginx) if you expose it publicly.

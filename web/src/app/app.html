@@ -1,0 +1,83 @@
+<div class="shell" [class.sidebar-open]="sidebarOpen()">
+  <header class="mobile-bar">
+    <button type="button" class="icon-btn" (click)="sidebarOpen.set(true)" aria-label="Open navigation">
+      <app-icon name="menu" [size]="20" />
+    </button>
+    <span class="brand-name">ReleaseWatcher</span>
+  </header>
+
+  <div class="backdrop" (click)="sidebarOpen.set(false)"></div>
+
+  <aside class="sidebar" aria-label="Main navigation">
+    <div class="brand">
+      <span class="logo"><app-icon name="bell" [size]="18" /></span>
+      <span class="brand-name">ReleaseWatcher</span>
+      <button type="button" class="icon-btn close" (click)="sidebarOpen.set(false)" aria-label="Close navigation">
+        <app-icon name="close" />
+      </button>
+    </div>
+
+    <nav>
+      @for (item of nav; track item.path) {
+        <a [routerLink]="item.path" routerLinkActive="active" #rla="routerLinkActive" [attr.aria-current]="rla.isActive ? 'page' : null">
+          <app-icon [name]="item.icon" />
+          <span>{{ item.label }}</span>
+          @if (item.path === '/repositories' && statusService.status(); as s) {
+            <span class="count">{{ s.repositories.total }}</span>
+          }
+        </a>
+      }
+    </nav>
+
+    <section class="poller" aria-label="Polling status">
+      @if (statusService.status(); as s) {
+        <div class="poller-row">
+          <span class="dot" [class.busy]="s.poller.isRunning || statusService.checkingAll()" [class.warn]="s.repositories.withErrors > 0"></span>
+          <span>
+            @if (s.poller.isRunning || statusService.checkingAll()) {
+              Checking now…
+            } @else if (s.poller.nextRunAt) {
+              Next check {{ s.poller.nextRunAt | relativeTime: now() }}
+            } @else {
+              Waiting to start
+            }
+          </span>
+        </div>
+        <div class="poller-meta">
+          Every {{ s.poller.intervalMinutes }} min
+          @if (s.poller.lastRunFinishedAt) {
+            · last {{ s.poller.lastRunFinishedAt | relativeTime: now() }}
+          }
+        </div>
+        @if (s.repositories.updatesAvailable > 0) {
+          <a class="poller-meta update-link" routerLink="/repositories">
+            {{ s.repositories.updatesAvailable }} update(s) available for your installs
+          </a>
+        }
+        @if (s.repositories.withErrors > 0) {
+          <div class="poller-meta warn-text">{{ s.repositories.withErrors }} repo(s) with errors</div>
+        }
+      }
+      <button type="button" class="btn btn-secondary btn-block" (click)="statusService.checkAll()" [disabled]="statusService.checkingAll()">
+        <app-icon name="refresh" [size]="16" [class.spin]="statusService.checkingAll()" />
+        Check all now
+      </button>
+    </section>
+  </aside>
+
+  <main class="content">
+    <router-outlet />
+  </main>
+</div>
+
+<div class="toasts" aria-live="polite">
+  @for (toast of toastService.toasts(); track toast.id) {
+    <div class="toast" [class]="'toast toast-' + toast.kind" role="status">
+      <app-icon [name]="toast.kind === 'error' ? 'alert' : 'check'" [size]="16" />
+      <span>{{ toast.text }}</span>
+      <button type="button" class="icon-btn" (click)="toastService.dismiss(toast.id)" aria-label="Dismiss">
+        <app-icon name="close" [size]="14" />
+      </button>
+    </div>
+  }
+</div>
