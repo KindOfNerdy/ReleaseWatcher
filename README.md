@@ -55,6 +55,31 @@ adjust it if you change `PORT`).
 | `npm run serve`     | start the app without touching the UI build               |
 | `npm test`          | server tests (node:test) + UI tests (Vitest)              |
 | `npm run typecheck` | type-check the server                                     |
+| `npm run package`   | ready-to-run release folder in `release/` (see Releases)  |
+
+## Releases
+
+`npm run package` builds a ready-to-run folder in `release/releasewatcher-<version>/` with the server,
+the production UI and the production dependencies. The target machine only needs Node.js:
+
+```bash
+cp .env.example .env   # optional, settings can also be changed in the UI
+npm start              # http://localhost:8080
+```
+
+Pushing a tag runs `.github/workflows/release.yml`:
+
+| Tag          | GitHub Release                         | Docker image (`ghcr.io/<owner>/releasewatcher`) |
+| ------------ | -------------------------------------- | ----------------------------------------------- |
+| `v1.2.3`     | release with `releasewatcher-1.2.3.zip` | `1.2.3`, `1.2`, `latest`                        |
+| `beta-1.2.3` | pre-release with the zip               | `beta-1.2.3`                                    |
+
+```bash
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+To run the published image instead of building locally, replace `build: .` in `docker-compose.yml` with
+`image: ghcr.io/<owner>/releasewatcher:latest` (log in with `docker login ghcr.io` if the package is private).
 
 ## UI
 

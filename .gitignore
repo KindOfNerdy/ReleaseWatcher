@@ -5,6 +5,9 @@ web/dist/
 # Angular build output is served by the server
 /public/
 
+# Release packages (npm run package)
+/release/
+
 # SQLite database
 *.db
 *.db-shm

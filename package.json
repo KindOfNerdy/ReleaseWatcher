@@ -17,7 +17,8 @@
     "test": "npm run test:api && npm run test:web",
     "test:api": "node --disable-warning=ExperimentalWarning --test \"test/**/*.test.ts\"",
     "test:web": "npm test --workspace web -- --watch=false",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "package": "node scripts/package.ts"
   },
   "dependencies": {
     "@fastify/static": "^10.1.11",

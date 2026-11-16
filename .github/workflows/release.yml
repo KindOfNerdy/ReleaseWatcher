@@ -1,0 +1,78 @@
+name: Release
+
+# Push a tag to publish a release:
+#   v1.2.3        -> GitHub Release + Docker image :1.2.3, :1.2 and :latest
+#   beta-1.2.3    -> GitHub pre-release + Docker image :beta-1.2.3 (no :latest)
+on:
+  push:
+    tags: ['v*', 'beta-*']
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+      - name: Build release package
+        id: pkg
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          npm run package -- "$VERSION"
+          cd release
+          zip -qr "releasewatcher-$VERSION.zip" "releasewatcher-$VERSION"
+          echo "file=release/releasewatcher-$VERSION.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PRERELEASE=""
+          if [[ "$GITHUB_REF_NAME" == beta-* ]]; then PRERELEASE="--prerelease"; fi
+          gh release create "$GITHUB_REF_NAME" "${{ steps.pkg.outputs.file }}" \
+            --title "$GITHUB_REF_NAME" --generate-notes $PRERELEASE
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # metadata-action lowercases the name (GHCR requires lowercase)
+          images: ${{ env.IMAGE }}
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref_name, 'v') }}
+            type=raw,value=${{ github.ref_name }},enable=${{ startsWith(github.ref_name, 'beta-') }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
