@@ -84,6 +84,20 @@
       </button>
     </section>
 
+    <footer class="sidebar-foot">
+      <span class="version mono">{{ version() }}</span>
+      <a
+        class="icon-btn"
+        [href]="repositoryUrl"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="ReleaseWatcher on GitHub"
+        title="ReleaseWatcher on GitHub"
+      >
+        <app-icon name="github" [size]="16" />
+      </a>
+    </footer>
+
     <section class="user" aria-label="Account">
       <a routerLink="/account" routerLinkActive="active" class="user-link" [attr.aria-current]="null">
         <app-icon name="user" [size]="16" />
