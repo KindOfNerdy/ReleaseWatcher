@@ -19,6 +19,7 @@ interface Row {
   installed_version: string | null;
   installed_version_checked_at: string | null;
   installed_version_error: string | null;
+  github_token: string | null;
 }
 
 const toEntity = (r: Row): WatchedRepository => ({
@@ -39,6 +40,7 @@ const toEntity = (r: Row): WatchedRepository => ({
   installedVersion: r.installed_version,
   installedVersionCheckedAt: r.installed_version_checked_at,
   installedVersionError: r.installed_version_error,
+  githubToken: r.github_token,
 });
 
 function parseHeaders(json: string | null): { name: string; value: string }[] {
@@ -81,6 +83,67 @@ const MIGRATIONS: readonly string[] = [
    ALTER TABLE watched_repositories ADD COLUMN installed_version_checked_at TEXT;
    ALTER TABLE watched_repositories ADD COLUMN installed_version_error TEXT;`,
   `ALTER TABLE watched_repositories ADD COLUMN installed_version_headers TEXT;`,
+  // Proxmox LXC containers, their applications and the log of checks/updates (+ missing indexes).
+  `CREATE INDEX idx_watched_repositories_enabled ON watched_repositories (is_enabled, id);
+
+   CREATE TABLE containers (
+     id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+     vmid                   INTEGER NOT NULL UNIQUE,
+     name                   TEXT    NOT NULL,
+     is_enabled             INTEGER NOT NULL DEFAULT 1,
+     apt_enabled            INTEGER NOT NULL DEFAULT 1,
+     snapshot_before_update INTEGER NOT NULL DEFAULT 0,
+     check_cron             TEXT,
+     status                 TEXT,
+     apt_upgradable         TEXT,
+     last_checked_at        TEXT,
+     last_error             TEXT,
+     notified_signature     TEXT,
+     created_at             TEXT    NOT NULL
+   );
+   CREATE INDEX idx_containers_enabled ON containers (is_enabled, vmid);
+
+   CREATE TABLE container_apps (
+     id                INTEGER PRIMARY KEY AUTOINCREMENT,
+     container_id      INTEGER NOT NULL REFERENCES containers (id) ON DELETE CASCADE,
+     name              TEXT    NOT NULL,
+     version_command   TEXT,
+     latest_source     TEXT    NOT NULL DEFAULT 'none',
+     repository_id     INTEGER REFERENCES watched_repositories (id) ON DELETE SET NULL,
+     latest_command    TEXT,
+     update_command    TEXT,
+     use_tty           INTEGER NOT NULL DEFAULT 0,
+     timeout_seconds   INTEGER NOT NULL DEFAULT 1800,
+     installed_version TEXT,
+     latest_version    TEXT,
+     checked_at        TEXT,
+     error             TEXT,
+     created_at        TEXT    NOT NULL
+   );
+   CREATE INDEX idx_container_apps_container ON container_apps (container_id, id);
+   CREATE INDEX idx_container_apps_repository ON container_apps (repository_id) WHERE repository_id IS NOT NULL;
+
+   CREATE TABLE container_runs (
+     id           INTEGER PRIMARY KEY AUTOINCREMENT,
+     container_id INTEGER NOT NULL REFERENCES containers (id) ON DELETE CASCADE,
+     app_id       INTEGER REFERENCES container_apps (id) ON DELETE SET NULL,
+     kind         TEXT    NOT NULL,
+     trigger      TEXT    NOT NULL,
+     status       TEXT    NOT NULL,
+     started_at   TEXT    NOT NULL,
+     finished_at  TEXT,
+     exit_code    INTEGER,
+     output       TEXT    NOT NULL DEFAULT ''
+   );
+   CREATE INDEX idx_container_runs_container ON container_runs (container_id, id DESC);
+   CREATE INDEX idx_container_runs_app ON container_runs (app_id) WHERE app_id IS NOT NULL;
+   CREATE INDEX idx_container_runs_running ON container_runs (status) WHERE status = 'running';`,
+  // Snapshots replaced by vzdump backups; NULL = use the global default.
+  `ALTER TABLE containers ADD COLUMN backup_before_update INTEGER;
+   UPDATE containers SET backup_before_update = 1 WHERE snapshot_before_update = 1;
+   ALTER TABLE containers DROP COLUMN snapshot_before_update;`,
+  // Per-repository GitHub token (overrides the global one).
+  `ALTER TABLE watched_repositories ADD COLUMN github_token TEXT;`,
 ];
 
 /** SQLite-backed store of watched repositories (uses Bun's built-in bun:sqlite module). */
@@ -92,6 +155,11 @@ export class RepositoryStore {
     this.db.run('PRAGMA journal_mode = WAL');
     this.db.run('PRAGMA foreign_keys = ON');
     this.migrate();
+  }
+
+  /** The shared connection (used by other stores such as `ContainerStore`). */
+  get database(): Database {
+    return this.db;
   }
 
   list(): WatchedRepository[] {
@@ -127,7 +195,7 @@ export class RepositoryStore {
            include_prereleases = ?, is_enabled = ?, last_seen_tag = ?, last_seen_published_at = ?,
            etag = ?, last_checked_at = ?, last_error = ?,
            installed_version_url = ?, installed_version_field = ?, installed_version_headers = ?, installed_version = ?,
-           installed_version_checked_at = ?, installed_version_error = ?
+           installed_version_checked_at = ?, installed_version_error = ?, github_token = ?
          WHERE id = ?`,
       )
       .run(
@@ -144,6 +212,7 @@ export class RepositoryStore {
         repo.installedVersion,
         repo.installedVersionCheckedAt,
         repo.installedVersionError,
+        repo.githubToken,
         repo.id,
       );
   }

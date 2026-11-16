@@ -1,4 +1,6 @@
 import type { Config } from './config.ts';
+import { validateCron } from './cron.ts';
+import { STORAGE_ID_PATTERN } from './proxmox/domain.ts';
 import type { RepositoryStore } from './db.ts';
 
 /** Runtime settings editable from the UI. Values stored in the database override environment defaults. */
@@ -8,7 +10,23 @@ export interface Settings {
   discordUsername: string | null;
   githubToken: string | null;
   pollIntervalMinutes: number;
+  proxmoxHost: string | null;
+  proxmoxPort: number;
+  proxmoxUser: string;
+  /** SSH private key used to log in to the Proxmox node. Secret. */
+  proxmoxSshKey: string | null;
+  /** Default cron schedule of container checks. */
+  containerCheckCron: string;
+  /** How many containers are checked at the same time. */
+  containerCheckConcurrency: number;
+  /** Storage that receives backups made before updates. */
+  backupStorage: string | null;
+  /** Default of "back up before updating" (containers can override it, and it can be changed per update). */
+  backupBeforeUpdate: boolean;
 }
+
+export const MIN_CHECK_CONCURRENCY = 1;
+export const MAX_CHECK_CONCURRENCY = 10;
 
 export type SettingKey = keyof Settings;
 export type SettingsPatch = { [K in SettingKey]?: Settings[K] | null };
@@ -43,6 +61,14 @@ export class SettingsService {
       discordUsername: config.discord.username,
       githubToken: config.github.token,
       pollIntervalMinutes: config.pollIntervalMs / 60_000,
+      proxmoxHost: config.proxmox.host,
+      proxmoxPort: config.proxmox.port,
+      proxmoxUser: config.proxmox.user,
+      proxmoxSshKey: config.proxmox.privateKey,
+      containerCheckCron: config.proxmox.checkCron,
+      containerCheckConcurrency: config.proxmox.checkConcurrency,
+      backupStorage: config.proxmox.backupStorage,
+      backupBeforeUpdate: config.proxmox.backupBeforeUpdate,
     };
     this.overrides = store.readSettings() as Partial<Record<SettingKey, string>>;
   }
@@ -55,6 +81,18 @@ export class SettingsService {
       discordUsername: o.discordUsername ?? this.defaults.discordUsername,
       githubToken: o.githubToken ?? this.defaults.githubToken,
       pollIntervalMinutes: o.pollIntervalMinutes !== undefined ? Number(o.pollIntervalMinutes) : this.defaults.pollIntervalMinutes,
+      proxmoxHost: o.proxmoxHost ?? this.defaults.proxmoxHost,
+      proxmoxPort: o.proxmoxPort !== undefined ? Number(o.proxmoxPort) : this.defaults.proxmoxPort,
+      proxmoxUser: o.proxmoxUser ?? this.defaults.proxmoxUser,
+      proxmoxSshKey: o.proxmoxSshKey ?? this.defaults.proxmoxSshKey,
+      containerCheckCron: o.containerCheckCron ?? this.defaults.containerCheckCron,
+      containerCheckConcurrency:
+        o.containerCheckConcurrency !== undefined
+          ? Number(o.containerCheckConcurrency)
+          : this.defaults.containerCheckConcurrency,
+      backupStorage: o.backupStorage ?? this.defaults.backupStorage,
+      backupBeforeUpdate:
+        o.backupBeforeUpdate !== undefined ? o.backupBeforeUpdate === 'true' : this.defaults.backupBeforeUpdate,
     };
   }
 
@@ -139,6 +177,58 @@ function validate(key: SettingKey, value: string): void {
       return;
     case 'githubToken':
       return;
+    case 'proxmoxHost':
+      if (!/^[A-Za-z0-9][A-Za-z0-9.:_-]*$/.test(value) || value.length > 253) {
+        throw new SettingsValidationError(key, 'Enter a host name or IP address.');
+      }
+      return;
+    case 'proxmoxPort': {
+      const port = Number(value);
+      if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+        throw new SettingsValidationError(key, 'Port must be between 1 and 65535.');
+      }
+      return;
+    }
+    case 'proxmoxUser':
+      if (!/^[A-Za-z_][A-Za-z0-9_.-]{0,31}$/.test(value)) {
+        throw new SettingsValidationError(key, 'Enter a valid user name.');
+      }
+      return;
+    case 'proxmoxSshKey':
+      if (!/^-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+-----END [A-Z ]*PRIVATE KEY-----$/.test(value)) {
+        throw new SettingsValidationError(key, 'Paste the whole private key (-----BEGIN … PRIVATE KEY----- … -----END …).');
+      }
+      if (/Proc-Type:\s*4,ENCRYPTED/.test(value)) {
+        throw new SettingsValidationError(key, 'Keys protected with a passphrase are not supported.');
+      }
+      return;
+    case 'backupStorage':
+      if (!STORAGE_ID_PATTERN.test(value)) {
+        throw new SettingsValidationError(key, 'Enter a Proxmox storage ID, e.g. "local" or "pbs".');
+      }
+      return;
+    case 'backupBeforeUpdate':
+      if (value !== 'true' && value !== 'false') {
+        throw new SettingsValidationError(key, 'Must be true or false.');
+      }
+      return;
+    case 'containerCheckConcurrency': {
+      const count = Number(value);
+      if (!Number.isInteger(count) || count < MIN_CHECK_CONCURRENCY || count > MAX_CHECK_CONCURRENCY) {
+        throw new SettingsValidationError(
+          key,
+          `Parallel checks must be between ${MIN_CHECK_CONCURRENCY} and ${MAX_CHECK_CONCURRENCY}.`,
+        );
+      }
+      return;
+    }
+    case 'containerCheckCron': {
+      const error = validateCron(value);
+      if (error) {
+        throw new SettingsValidationError(key, error);
+      }
+      return;
+    }
   }
 }
 

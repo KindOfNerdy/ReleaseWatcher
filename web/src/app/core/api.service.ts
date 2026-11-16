@@ -5,13 +5,21 @@ import {
   AddRepositoryRequest,
   AppSettings,
   AppStatus,
+  BackupStorage,
   CheckResult,
+  Container,
+  ContainerApp,
+  ContainerAppRequest,
+  DiscoveredContainer,
   HeaderInput,
   InstalledVersionTestResult,
   Notifier,
   RateLimit,
+  Run,
+  RunSummary,
   SettingsPatch,
   TestNotificationResult,
+  UpdateContainerRequest,
   UpdateRepositoryRequest,
   WatchedRepository,
 } from './models';
@@ -81,6 +89,87 @@ export class ApiService {
 
   getRateLimit(): Observable<RateLimit | null> {
     return this.http.get<RateLimit | null>(`${this.baseUrl}/github/rate-limit`);
+  }
+
+  /* ---------- Proxmox containers ---------- */
+
+  testProxmoxConnection(): Observable<{ output: string }> {
+    return this.http.post<{ output: string }>(`${this.baseUrl}/proxmox/test`, {});
+  }
+
+  discoverContainers(): Observable<DiscoveredContainer[]> {
+    return this.http.get<DiscoveredContainer[]>(`${this.baseUrl}/proxmox/containers`);
+  }
+
+  getBackupStorages(): Observable<BackupStorage[]> {
+    return this.http.get<BackupStorage[]>(`${this.baseUrl}/proxmox/storages`);
+  }
+
+  getContainers(): Observable<Container[]> {
+    return this.http.get<Container[]>(`${this.baseUrl}/containers`);
+  }
+
+  getContainer(id: number): Observable<Container> {
+    return this.http.get<Container>(`${this.baseUrl}/containers/${id}`);
+  }
+
+  addContainer(vmid: number, name: string | null = null): Observable<Container> {
+    return this.http.post<Container>(`${this.baseUrl}/containers`, { vmid, name });
+  }
+
+  updateContainer(id: number, request: UpdateContainerRequest): Observable<Container> {
+    return this.http.put<Container>(`${this.baseUrl}/containers/${id}`, request);
+  }
+
+  deleteContainer(id: number): Observable<void> {
+    return this.http.delete<void>(`${this.baseUrl}/containers/${id}`);
+  }
+
+  checkAllContainers(): Observable<{ queued: number }> {
+    return this.http.post<{ queued: number }>(`${this.baseUrl}/containers/check-all`, {});
+  }
+
+  checkContainer(id: number): Observable<Run> {
+    return this.http.post<Run>(`${this.baseUrl}/containers/${id}/check`, {});
+  }
+
+  /** `backup` decides about a backup (vzdump) before this update. */
+  upgradeApt(id: number, backup: boolean): Observable<Run> {
+    return this.http.post<Run>(`${this.baseUrl}/containers/${id}/apt-upgrade`, { backup });
+  }
+
+  addContainerApp(containerId: number, request: ContainerAppRequest): Observable<ContainerApp> {
+    return this.http.post<ContainerApp>(`${this.baseUrl}/containers/${containerId}/apps`, request);
+  }
+
+  updateContainerApp(
+    containerId: number,
+    appId: number,
+    request: ContainerAppRequest,
+  ): Observable<ContainerApp> {
+    return this.http.put<ContainerApp>(
+      `${this.baseUrl}/containers/${containerId}/apps/${appId}`,
+      request,
+    );
+  }
+
+  deleteContainerApp(containerId: number, appId: number): Observable<void> {
+    return this.http.delete<void>(`${this.baseUrl}/containers/${containerId}/apps/${appId}`);
+  }
+
+  /** `backup` decides about a backup (vzdump) before this update. */
+  updateApp(containerId: number, appId: number, backup: boolean): Observable<Run> {
+    return this.http.post<Run>(`${this.baseUrl}/containers/${containerId}/apps/${appId}/update`, {
+      backup,
+    });
+  }
+
+  getContainerRuns(containerId: number): Observable<RunSummary[]> {
+    return this.http.get<RunSummary[]>(`${this.baseUrl}/containers/${containerId}/runs`);
+  }
+
+  getRun(id: number): Observable<Run> {
+    return this.http.get<Run>(`${this.baseUrl}/runs/${id}`);
   }
 }
 
