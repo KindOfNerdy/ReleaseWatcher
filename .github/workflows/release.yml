@@ -1,7 +1,7 @@
 name: Release
 
 # Push a tag to publish a release:
-#   v1.2.3        -> GitHub Release + Docker image :1.2.3, :1.2 and :latest
+#   v1.2.3        -> GitHub Release (zip for Bun + Linux x64 executable) + Docker image :1.2.3, :1.2 and :latest
 #   beta-1.2.3    -> GitHub pre-release + Docker image :beta-1.2.3 (no :latest)
 on:
   push:
@@ -19,22 +19,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      # The Angular CLI (build + Vitest) still runs on Node.
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
+          node-version: 26
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run test
 
       - name: Build release package
         id: pkg
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          npm run package -- "$VERSION"
+          bun run package "$VERSION"
           cd release
           zip -qr "releasewatcher-$VERSION.zip" "releasewatcher-$VERSION"
           echo "file=release/releasewatcher-$VERSION.zip" >> "$GITHUB_OUTPUT"
+          echo "binary=release/releasewatcher-$VERSION-linux-x64" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         env:
@@ -42,7 +46,7 @@ jobs:
         run: |
           PRERELEASE=""
           if [[ "$GITHUB_REF_NAME" == beta-* ]]; then PRERELEASE="--prerelease"; fi
-          gh release create "$GITHUB_REF_NAME" "${{ steps.pkg.outputs.file }}" \
+          gh release create "$GITHUB_REF_NAME" "${{ steps.pkg.outputs.file }}" "${{ steps.pkg.outputs.binary }}" \
             --title "$GITHUB_REF_NAME" --generate-notes $PRERELEASE
 
   docker:

@@ -21,3 +21,7 @@ web/dist/
 .vscode/*
 !.vscode/extensions.json
 .DS_Store
+
+# Compiled server executable (bun run compile)
+/dist/
+/.compile/
