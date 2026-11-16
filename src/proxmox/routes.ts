@@ -8,6 +8,7 @@ import {
   type Container,
   type ContainerApp,
   DEFAULT_APP_TIMEOUT_SECONDS,
+  type DiscoveredContainer,
   LATEST_SOURCES,
   type LatestSource,
   MAX_APP_TIMEOUT_SECONDS,
@@ -43,6 +44,7 @@ const updateContainerSchema: ObjectSchema = {
     isEnabled: { type: 'boolean' },
     aptEnabled: { type: 'boolean' },
     backupBeforeUpdate: { type: 'boolean', nullable: true },
+    startWhenStopped: { type: 'boolean' },
     checkCron: { type: 'string', nullable: true, maxLength: 200 },
   },
   required: ['name', 'isEnabled', 'aptEnabled'],
@@ -149,6 +151,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       backupBeforeUpdate: c.backupBeforeUpdate,
       /** Whether updates back up first unless changed for a single update. */
       effectiveBackupBeforeUpdate: c.backupBeforeUpdate ?? deps.backupDefaults().enabled,
+      startWhenStopped: c.startWhenStopped,
       checkCron: c.checkCron,
       nextCheckAt: scheduler.nextRunOf(c)?.toISOString() ?? null,
       status: c.status,
@@ -287,6 +290,28 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           });
         }),
     },
+    // Adds every container of the node that has not been added yet and queues a check of each.
+    '/api/containers/add-all': {
+      POST: () =>
+        guard(async () => {
+          if (!service.shell.isConfigured) {
+            throw new ShellNotConfiguredError();
+          }
+          let found: DiscoveredContainer[];
+          try {
+            found = await service.discover();
+          } catch (error) {
+            return problem(502, 'Listing containers failed.', { detail: errorMessage(error) });
+          }
+          const added = found.filter((c) => !containers.existsVmid(c.vmid)).map((c) => containers.add(c.vmid, c.name));
+          // Checks run through the scheduler queue, so the concurrency limit applies.
+          void scheduler.checkMany(added.map((c) => c.id));
+          return Response.json(
+            added.map((c) => containerDto(c)),
+            { status: added.length > 0 ? 201 : 200 },
+          );
+        }),
+    },
     '/api/containers/check-all': {
       POST: () =>
         guard(() => {
@@ -309,6 +334,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           isEnabled: boolean;
           aptEnabled: boolean;
           backupBeforeUpdate?: boolean | null;
+          startWhenStopped?: boolean;
           checkCron?: string | null;
         }>(req, updateContainerSchema);
         if (!container) {
@@ -328,6 +354,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           isEnabled: body.isEnabled,
           aptEnabled: body.aptEnabled,
           backupBeforeUpdate: body.backupBeforeUpdate === undefined ? container.backupBeforeUpdate : body.backupBeforeUpdate,
+          startWhenStopped: body.startWhenStopped ?? container.startWhenStopped,
           checkCron,
         });
         if (!container.aptEnabled) {
