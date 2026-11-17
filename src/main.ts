@@ -16,7 +16,7 @@ import { SettingsService } from './settings.ts';
 // `--version` prints the version and exits before touching the configuration, the database or the port – usable as
 // the version command of the container app that runs ReleaseWatcher itself.
 if (process.argv.includes('--version')) {
-  console.log(APP_VERSION);
+  console.log(`v${APP_VERSION}`); // same form as the release tags (v1.2.3)
   process.exit(0);
 }
 

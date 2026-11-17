@@ -17,7 +17,7 @@ describe('command line', () => {
         timeout: 20_000,
       });
       assert.equal(result.exitCode, 0, result.stderr.toString());
-      assert.equal(result.stdout.toString().trim(), pkg.version);
+      assert.equal(result.stdout.toString().trim(), `v${pkg.version}`);
       assert.deepEqual(readdirSync(dir), []);
     } finally {
       rmSync(dir, { recursive: true, force: true });
