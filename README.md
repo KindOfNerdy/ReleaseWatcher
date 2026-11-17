@@ -54,7 +54,8 @@ versions on a cron schedule and runs updates (apt, community-scripts `update`, y
    - *latest version* – the newest release of a watched GitHub repository, a command, or none,
    - *update command* – e.g. `update` (community-scripts) or `cd /opt/app && ./pull.sh`.
      Enable **TTY** for scripts that need a terminal (it runs in a pseudo-terminal via `script`); every update has a
-     timeout (default 30 min). For community-scripts use `PHS_SILENT=1 update` – menus pick their default option.
+     timeout (default 30 min). Update commands run with `PHS_SILENT=1` and `DEBIAN_FRONTEND=noninteractive`, so a
+     plain `update` of community-scripts skips its *Silent / Verbose / Cancel* menu and updates silently.
 5. Checks run on the cron schedule (`CONTAINER_CHECK_CRON`, default every 6 hours, server time zone – set `TZ`) and
    notify Discord when something new is pending (each pending item is reported once). A check is a single SSH
    connection: `pct status` plus one `pct exec` running the apt check and all version commands, each with its own
@@ -76,8 +77,10 @@ versions on a cron schedule and runs updates (apt, community-scripts `update`, y
    (never lowered) and set back to the previous values afterwards – also when the update fails. The previous values
    are saved first, so they are restored on the next start if ReleaseWatcher stopped in between.
 
-> Interactive scripts (whiptail dialogs) cannot be answered from the UI – a script that waits for input ends with a
-> timeout. Prefer non-interactive update commands.
+> Interactive scripts (whiptail dialogs) cannot be answered from the UI. When an update shows a prompt – a
+> whiptail/dialog menu, a `[y/N]` question, a dpkg config-file question, “Press Enter” – and prints nothing more for
+> 45 seconds, it is stopped and the run fails with a message instead of waiting for its timeout. Prefer
+> non-interactive update commands.
 
 ## Quick start (Docker)
 

@@ -12,6 +12,10 @@ import {
   detachedCleanupCommand,
   detachedFollowCommand,
   detachedStartCommand,
+  detachedStopCommand,
+  detectInteractivePrompt,
+  appUpdateScript,
+  PROMPT_TAIL_LENGTH,
   type DetachedStep,
   detachedUnit,
   parseDetachedOutput,
@@ -166,10 +170,21 @@ export interface ContainerServiceDeps {
   reconnectDelayMs?: number;
   /** Pause between checks whether a container already sees raised CPU cores (default 2 s). */
   resourcePollMs?: number;
+  /**
+   * How long a running update may show an interactive prompt without new output before it is stopped
+   * (default 45 s) – a script waiting for input would otherwise run into its full timeout.
+   */
+  promptIdleMs?: number;
 }
 
 /** Extra time to wait for a detached command after its own timeout (systemd stops it at the timeout). */
 const FOLLOW_GRACE_MS = 60_000;
+
+/** A detached command that was stopped because it waited for input. */
+interface PromptStop {
+  prompt: string;
+  idleSeconds: number;
+}
 
 /** Checks LXC containers for pending apt/application updates and runs updates on request. */
 export class ContainerService {
@@ -177,6 +192,7 @@ export class ContainerService {
   private readonly now: () => Date;
   private readonly reconnectDelayMs: number;
   private readonly resourcePollMs: number;
+  private readonly promptIdleMs: number;
   /** Running task per container ID – at most one check/update per container at a time. */
   private readonly active = new Map<number, Promise<Run>>();
   /** Most recent task per container (kept after it finished, for {@link wait}). */
@@ -189,6 +205,7 @@ export class ContainerService {
     this.now = deps.now ?? (() => new Date());
     this.reconnectDelayMs = deps.reconnectDelayMs ?? 5000;
     this.resourcePollMs = deps.resourcePollMs ?? 2000;
+    this.promptIdleMs = deps.promptIdleMs ?? 45_000;
   }
 
   get shell(): NodeShell {
@@ -288,7 +305,7 @@ export class ContainerService {
         await this.backupFirst(container, backupStorage, log, `update of ${app.name}`, startedContainer);
         const result = await this.withUpdateResources(container, log, () => {
           log.note(`Updating ${app.name}: ${command}`);
-          return this.execDetached(log, 'update', pctExec(container.vmid, command), {
+          return this.execDetached(log, 'update', pctExec(container.vmid, appUpdateScript(command)), {
             timeoutMs: app.timeoutSeconds * 1000,
             tty: app.useTty,
             startedContainer,
@@ -425,19 +442,41 @@ export class ContainerService {
     const { shell } = this.deps;
     const mark = log.mark();
     const deadline = Date.now() + timeoutMs + FOLLOW_GRACE_MS;
+    let stopped: PromptStop | null = null;
     for (let attempt = 0; ; attempt++) {
       const token = newCheckToken();
       log.truncate(mark);
-      const result = await shell.run(detachedFollowCommand(unit, token), {
-        timeoutMs: Math.max(1000, deadline - Date.now()),
-        onOutput: (chunk) => log.write(chunk),
-      });
+      const watch = this.watchForPrompt(unit, (stop) => (stopped ??= stop));
+      let result: CommandResult;
+      try {
+        result = await shell.run(detachedFollowCommand(unit, token), {
+          timeoutMs: Math.max(1000, deadline - Date.now()),
+          onOutput: (chunk) => {
+            watch.output(chunk);
+            log.write(chunk);
+          },
+        });
+      } finally {
+        watch.dispose();
+      }
       const parsed = parseDetachedOutput(result.output, token);
       if (parsed.state !== 'incomplete') {
         log.truncate(mark);
         log.write(parsed.output);
         if (attempt > 0) {
           log.note(`The connection to the node dropped ${attempt}× – the command kept running and its output was read again`);
+        }
+        if (stopped && parsed.state !== 'missing') {
+          const { prompt, idleSeconds }: PromptStop = stopped;
+          await shell.run(detachedCleanupCommand(unit), { timeoutMs: NODE_TIMEOUT_MS }).catch(() => undefined);
+          return {
+            exitCode: -1,
+            output:
+              `The command stopped at ${prompt} and waited ${idleSeconds} s for input, so it was cancelled – ` +
+              'updates cannot answer prompts. Use a non-interactive update command (community-scripts read ' +
+              'PHS_SILENT=1, which ReleaseWatcher sets for every application update).',
+            timedOut: false,
+          };
         }
         if (parsed.state === 'missing') {
           return { exitCode: -1, output: 'The command output on the node is gone (was the node restarted?).', timedOut: false };
@@ -453,6 +492,36 @@ export class ContainerService {
       this.deps.log.warn({ unit, attempt: attempt + 1, exitCode: result.exitCode }, 'Lost the connection to a running command – reconnecting');
       await Bun.sleep(this.reconnectDelayMs);
     }
+  }
+
+  /**
+   * Watches the output of a detached command: when it ends at an interactive prompt and nothing new arrives for
+   * `promptIdleMs`, the unit is stopped on the node (the follow connection then ends) and `onStop` is called once.
+   */
+  private watchForPrompt(unit: string, onStop: (stop: PromptStop) => void): { output: (chunk: string) => void; dispose: () => void } {
+    let tail = '';
+    let lastOutputAt = Date.now();
+    let stopping = false;
+    const timer = setInterval(
+      () => {
+        const idleMs = Date.now() - lastOutputAt;
+        if (stopping || idleMs < this.promptIdleMs) return;
+        const prompt = detectInteractivePrompt(tail);
+        if (!prompt) return;
+        stopping = true;
+        onStop({ prompt, idleSeconds: Math.round(idleMs / 1000) });
+        this.deps.log.warn({ unit, prompt }, 'Command is waiting for input – stopping it');
+        this.deps.shell.run(detachedStopCommand(unit), { timeoutMs: NODE_TIMEOUT_MS }).catch(() => undefined);
+      },
+      Math.max(10, Math.min(5000, Math.floor(this.promptIdleMs / 4))),
+    );
+    return {
+      output: (chunk) => {
+        tail = (tail + chunk).slice(-PROMPT_TAIL_LENGTH);
+        lastOutputAt = Date.now();
+      },
+      dispose: () => clearInterval(timer),
+    };
   }
 
   /** Raises CPU/memory for an update when configured and restores the previous values afterwards. */

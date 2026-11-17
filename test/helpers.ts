@@ -88,6 +88,14 @@ export class FakeShell implements NodeShell {
   readonly detached: { unit: string; command: string; tty: boolean }[] = [];
   /** The next N follow connections drop (exit 255) after printing part of the output. */
   dropFollows = 0;
+  /**
+   * Detached units keep running after printing their output (like a script waiting for input) until they are
+   * stopped with `detachedStopCommand`; following them then ends without an exit code.
+   */
+  hangUntilStopped = false;
+  /** Units stopped with `detachedStopCommand`. */
+  readonly stoppedUnits: string[] = [];
+  private readonly stopWaiters = new Map<string, () => void>();
   private readonly handlers: [RegExp, Partial<CommandResult> | ((command: string) => Partial<CommandResult> | Promise<Partial<CommandResult>>)][] =
     [];
 
@@ -101,10 +109,10 @@ export class FakeShell implements NodeShell {
 
   async run(command: string, options: RunOptions): Promise<CommandResult> {
     this.connections++;
-    const detached = await this.runDetachedProtocol(command);
+    const detached = await this.runDetachedProtocol(command, options);
     if (detached) {
-      if (detached.output) options.onOutput?.(detached.output);
-      return detached;
+      if (detached.output) options.onOutput?.(detached.output.slice(detached.streamed ?? 0));
+      return { exitCode: detached.exitCode, output: detached.output, timedOut: detached.timedOut };
     }
     const token = command.match(/@@RW-[0-9a-f]+@@/)?.[0];
     const result = token ? await this.runCheckBatch(command, token) : await this.answer(command);
@@ -115,8 +123,11 @@ export class FakeShell implements NodeShell {
   }
 
   /** Emulates `detachedStartCommand`, `detachedFollowCommand` and `detachedCleanupCommand`. */
-  private async runDetachedProtocol(command: string): Promise<CommandResult | null> {
-    const header = command.match(/^# releasewatcher (detached|follow|cleanup) (\S+)/);
+  private async runDetachedProtocol(
+    command: string,
+    options: RunOptions,
+  ): Promise<(CommandResult & { streamed?: number }) | null> {
+    const header = command.match(/^# releasewatcher (detached|follow|cleanup|stop) (\S+)/);
     if (!header) {
       return null;
     }
@@ -134,6 +145,11 @@ export class FakeShell implements NodeShell {
       this.units.delete(unit);
       return ok();
     }
+    if (action === 'stop') {
+      this.stoppedUnits.push(unit);
+      this.stopWaiters.get(unit)?.();
+      return ok();
+    }
     const token = command.match(/@@RW-[0-9a-f]+@@/)![0];
     const result = this.units.get(unit);
     if (!result) {
@@ -143,6 +159,12 @@ export class FakeShell implements NodeShell {
       this.dropFollows--;
       const partial = `${result.output.slice(0, 5)}\nclient_loop: send disconnect: Broken pipe\n`;
       return { exitCode: 255, output: partial, timedOut: false };
+    }
+    if (this.hangUntilStopped && !this.stoppedUnits.includes(unit)) {
+      options.onOutput?.(result.output);
+      await new Promise<void>((resolve) => this.stopWaiters.set(unit, resolve));
+      // The output was streamed already – run() passes on only the end marker.
+      return { exitCode: 0, output: `${result.output}\n${token} exit lost\n`, timedOut: false, streamed: result.output.length };
     }
     return ok(`${result.output}\n${token} exit ${result.exitCode}\n`);
   }

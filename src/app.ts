@@ -97,6 +97,8 @@ export interface AppDeps {
   reconnectDelayMs?: number;
   /** Pause between checks whether a container already sees CPU cores raised for an update (tests use 0). */
   resourcePollMs?: number;
+  /** How long an update may wait at an interactive prompt before it is stopped (tests use a few ms). */
+  promptIdleMs?: number;
   /** Login. Defaults: sessions required, origin/RP ID from the request, X-Forwarded-For not trusted. */
   auth?: {
     /** false turns the session check off – only for tests of other features. */
@@ -297,6 +299,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     log,
     ...(deps.reconnectDelayMs === undefined ? {} : { reconnectDelayMs: deps.reconnectDelayMs }),
     ...(deps.resourcePollMs === undefined ? {} : { resourcePollMs: deps.resourcePollMs }),
+    ...(deps.promptIdleMs === undefined ? {} : { promptIdleMs: deps.promptIdleMs }),
   });
   const scheduler = new ContainerScheduler({
     store: containerStore,

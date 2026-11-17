@@ -3,6 +3,9 @@ import { describe, it } from 'bun:test';
 import {
   APT_LIST_MARKER,
   appUpdateAvailable,
+  appUpdateScript,
+  detectInteractivePrompt,
+  stripTerminalCodes,
   cleanOutput,
   OutputCleaner,
   detachedFollowCommand,
@@ -25,6 +28,34 @@ import {
 import { SshShell } from '../src/proxmox/ssh.ts';
 
 describe('proxmox domain', () => {
+  it('runs application updates with the non-interactive switches of community-scripts and apt', () => {
+    assert.equal(appUpdateScript('update'), 'export PHS_SILENT=1 DEBIAN_FRONTEND=noninteractive\nupdate');
+  });
+
+  it('strips terminal escape sequences', () => {
+    assert.equal(stripTerminalCodes('\x1b[1;32mOK\x1b[0m \x1b(0lqk\x1b(B\x1b]0;title\x07done\x1b[?25h'), 'OK lqkdone');
+  });
+
+  it('recognises output that waits at an interactive prompt', () => {
+    const whiptail =
+      '\x1b[?1049h\x1b[1;1H\x1b(0lqqk\x1b(B\x1b[3;3H1 YES (Silent Mode)\x1b[4;3H2 YES (Verbose Mode)\x1b[8;20H<Ok>';
+    assert.equal(detectInteractivePrompt(whiptail), 'an interactive menu (whiptail/dialog)');
+    assert.equal(
+      detectInteractivePrompt('Remove old files? [Y/n] '),
+      'a question waiting for an answer ("Remove old files? [Y/n]")',
+    );
+    assert.match(detectInteractivePrompt('Continue (y/N)?\n') ?? '', /question/);
+    assert.match(detectInteractivePrompt("Configuration file '/etc/x.conf'\n*** x.conf (Y/I/N/O/D/Z) [default=N] ?") ?? '', /question/);
+    assert.match(detectInteractivePrompt('Press Enter to continue') ?? '', /key press/);
+  });
+
+  it('does not take ordinary output for a prompt', () => {
+    assert.equal(detectInteractivePrompt(''), null);
+    assert.equal(detectInteractivePrompt('Compiling vaultwarden v1.32.0\n   Building [=====>   ] 120/300\n'), null);
+    assert.equal(detectInteractivePrompt('Do you want to continue? [Y/n] y\nUnpacking curl (8.1) ...\n'), null, 'answered question');
+    assert.equal(detectInteractivePrompt('  ⠋ Updating Vaultwarden\r  ✔️ Updated Vaultwarden\n'), null);
+  });
+
   it('parses pct list with and without a lock column', () => {
     const output = [
       'VMID       Status     Lock         Name',

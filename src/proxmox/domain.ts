@@ -215,6 +215,53 @@ export function detachedFollowCommand(unit: string, token: string): string {
   ].join('\n');
 }
 
+/** Node command stopping a detached unit (e.g. one stuck at an interactive prompt); its output stays readable. */
+export const detachedStopCommand = (unit: string): string =>
+  `# releasewatcher stop ${unit}\nsystemctl stop ${unit} 2>/dev/null; true`;
+
+/**
+ * Environment set before every application update command so that scripts take their non-interactive path:
+ * Proxmox VE Helper Scripts (community-scripts) skip their "Silent / Verbose / Cancel" menu when `PHS_SILENT=1`
+ * (note the spelling: Proxmox Helper Scripts), and apt/debconf do not ask questions.
+ */
+export const NON_INTERACTIVE_ENV = 'export PHS_SILENT=1 DEBIAN_FRONTEND=noninteractive';
+
+/** Script running an application update command non-interactively (see {@link NON_INTERACTIVE_ENV}). */
+export const appUpdateScript = (command: string): string => `${NON_INTERACTIVE_ENV}\n${command}`;
+
+/** Removes terminal escape sequences (colours, cursor movement, charset switches) from command output. */
+export function stripTerminalCodes(text: string): string {
+  return text
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+    .replace(/\x1b[()*+][0-9A-Za-z]/g, '')
+    .replace(/\x1b[=>78DEHMc]/g, '')
+    .replace(/[\x0e\x0f]/g, '');
+}
+
+/** Number of characters at the end of the output that {@link detectInteractivePrompt} looks at. */
+export const PROMPT_TAIL_LENGTH = 4000;
+
+/**
+ * Recognises output that ends at a prompt waiting for input: a whiptail/dialog screen (buttons like `<Ok>`), a
+ * yes/no question (`[Y/n]`, `(y/N)`), a dpkg config-file question (`[default=N] ?`) or "Press Enter". Returns a short
+ * description of the prompt, or null. Only meaningful when the output has not changed for a while.
+ */
+export function detectInteractivePrompt(output: string): string | null {
+  const text = stripTerminalCodes(output.slice(-PROMPT_TAIL_LENGTH));
+  if (/<\s*(?:Ok|Yes|No|Cancel|Exit[- ]Script)\s*>/i.test(text)) {
+    return 'an interactive menu (whiptail/dialog)';
+  }
+  const end = text.replace(/\s+$/, '').split(/[\r\n]/).at(-1) ?? '';
+  if (/[[(]\s*y(?:es)?\s*\/\s*n(?:o)?\s*[\])]\s*[:?]?$/i.test(end) || /\[default=\w+\]\s*\?$/i.test(end)) {
+    return `a question waiting for an answer ("${end.trim().slice(-120)}")`;
+  }
+  if (/press (?:enter|return|any key)/i.test(end)) {
+    return `a prompt waiting for a key press ("${end.trim().slice(-120)}")`;
+  }
+  return null;
+}
+
 /** Node command removing the files of a finished detached unit. */
 export const detachedCleanupCommand = (unit: string): string =>
   `# releasewatcher cleanup ${unit}\nrm -rf ${DETACHED_DIR}/${unit}`;

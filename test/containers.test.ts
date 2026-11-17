@@ -44,7 +44,7 @@ describe('containers API', () => {
     notifier = new RecordingNotifier();
     store = new RepositoryStore(':memory:');
     const settings = new SettingsService(store, loadConfig({}));
-    app = await buildApp({ store, settings, source, notifiers: [notifier], log: silentLogger, shell, reconnectDelayMs: 0, resourcePollMs: 0, auth: { requireAuth: false } });
+    app = await buildApp({ store, settings, source, notifiers: [notifier], log: silentLogger, shell, reconnectDelayMs: 0, resourcePollMs: 0, promptIdleMs: 40, auth: { requireAuth: false } });
     baseUrl = app.listen({ port: 0, hostname: '127.0.0.1' }).url;
   });
 
@@ -268,6 +268,48 @@ describe('containers API', () => {
       ],
     );
     assert.equal(shell.units.size, 0, 'finished units are cleaned up on the node');
+  });
+
+  it('runs application updates non-interactively (PHS_SILENT=1 for community-scripts)', async () => {
+    const container = await addContainer();
+    const created = await request('POST', `/api/containers/${container.id}/apps`, {
+      name: 'Vaultwarden',
+      latestSource: 'none',
+      updateCommand: 'update',
+      useTty: true,
+    });
+    shell.on(/\nupdate'$/, { output: 'Updated.\n' });
+    await request('POST', `/api/containers/${container.id}/apps/${created.json().id}/update`);
+    assert.equal((await app.containers.wait(container.id))?.status, 'succeeded');
+
+    assert.match(shell.detached[0]?.command ?? '', /\nexport PHS_SILENT=1 DEBIAN_FRONTEND=noninteractive\nupdate'$/);
+  });
+
+  it('stops an update that waits at an interactive menu instead of running into its timeout', async () => {
+    const container = await addContainer();
+    const created = await request('POST', `/api/containers/${container.id}/apps`, {
+      name: 'Vaultwarden',
+      latestSource: 'none',
+      updateCommand: 'update',
+      useTty: true,
+    });
+    // whiptail as drawn in a pseudo-terminal: cursor movement, line-drawing charset, then silence.
+    const menu =
+      '\x1b[?1049h\x1b[1;1H\x1b(0lqqqqk\x1b(B Vaultwarden LXC Update/Setting \x1b[5;3H1 YES (Silent Mode)' +
+      '\x1b[6;3H2 YES (Verbose Mode)\x1b[7;3H3 NO (Cancel Update)\x1b[10;26H<Ok>\x1b[10;30H';
+    shell.on(/\nupdate'$/, { output: menu });
+    shell.hangUntilStopped = true;
+
+    const started = Date.now();
+    await request('POST', `/api/containers/${container.id}/apps/${created.json().id}/update`);
+    const run = await app.containers.wait(container.id);
+
+    assert.ok(Date.now() - started < 5000, 'stopped long before the 30-minute timeout');
+    assert.equal(run?.status, 'failed');
+    assert.deepEqual(shell.stoppedUnits, [`releasewatcher-run-${run?.id}-update`]);
+    assert.match(run?.output ?? '', /stopped at an interactive menu \(whiptail\/dialog\) and waited \d+ s for input/);
+    assert.match(run?.output ?? '', /YES \(Silent Mode\)/, 'the menu stays visible in the log');
+    assert.equal(shell.units.size, 0, 'the stopped unit is cleaned up on the node');
   });
 
   it('keeps an update running when the SSH connection drops and reads its output again', async () => {
