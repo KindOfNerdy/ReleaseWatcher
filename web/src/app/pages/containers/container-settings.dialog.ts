@@ -26,6 +26,7 @@ import {
 import { targetLabel } from './target';
 import { Icon } from '../../shared/icon';
 import { Switch } from '../../shared/switch';
+import { BackdropClose } from '../../shared/backdrop-close';
 
 /** Editable state of the application form. */
 interface AppForm {
@@ -62,7 +63,7 @@ const byName = (list: ContainerApp[]): ContainerApp[] =>
 /** Settings of one container and its applications (version check + update command). */
 @Component({
   selector: 'app-container-settings-dialog',
-  imports: [FormsModule, NgTemplateOutlet, Icon, Switch],
+  imports: [BackdropClose, FormsModule, NgTemplateOutlet, Icon, Switch],
   templateUrl: './container-settings.dialog.html',
   styleUrls: ['./dialog.scss', './container-settings.dialog.scss'],
 })
@@ -354,13 +355,6 @@ export class ContainerSettingsDialog {
         return 'latest from a command';
       default:
         return 'no latest version';
-    }
-  }
-
-  /** Closes on a backdrop click. Returns nothing on purpose (a `false` result would cancel the click). */
-  protected onDialogClick(event: MouseEvent, dialog: HTMLDialogElement): void {
-    if (event.target === dialog) {
-      this.close();
     }
   }
 

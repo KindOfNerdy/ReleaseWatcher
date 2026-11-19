@@ -18,6 +18,7 @@ import { Container, Run, RunKind, RunSummary } from '../../core/models';
 import { targetLabel } from './target';
 import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
+import { BackdropClose } from '../../shared/backdrop-close';
 
 /** What the dialog shows: one run (`runId`) or the history of a container (`runId: null`). */
 export interface RunLogTarget {
@@ -40,7 +41,7 @@ function keepTail(output: string): string {
 /** Console output of a check/update, refreshed live while it runs, plus the run history. */
 @Component({
   selector: 'app-run-log-dialog',
-  imports: [DatePipe, Icon, RelativeTimePipe],
+  imports: [BackdropClose, DatePipe, Icon, RelativeTimePipe],
   templateUrl: './run-log.dialog.html',
   styleUrls: ['./dialog.scss', './run-log.dialog.scss'],
 })
@@ -149,13 +150,6 @@ export class RunLogDialog {
     }
     const seconds = Math.max(0, Math.round((Date.parse(run.finishedAt) - Date.parse(run.startedAt)) / 1000));
     return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-  }
-
-  /** Closes on a backdrop click. Returns nothing on purpose (a `false` result would cancel the click). */
-  protected onDialogClick(event: MouseEvent, dialog: HTMLDialogElement): void {
-    if (event.target === dialog) {
-      this.close();
-    }
   }
 
   protected close(): void {

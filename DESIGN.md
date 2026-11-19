@@ -146,6 +146,8 @@ always used in pairs: text in `--x`, background in `--x-soft`.
   5. states: loading skeleton → empty state → “nothing matches” → data.
 - Other breakpoints used inside pages: 600px (repositories), 560px (settings), 480px (dialogs). Prefer these
   values over new ones; content must work at 360px wide without horizontal scroll.
+- Viewport heights use `dvh`, never `vh`: on phones `100vh` is the height without the browser bars, so
+  sticky/fixed elements and dialog footers sized with it end up hidden behind the address bar.
 
 ### 3.4 Components and global classes
 
@@ -172,6 +174,8 @@ Shared components in `web/src/app/shared/`:
 - `<app-switch [checked] label (toggled)>` – the only on/off control (no bare checkboxes for settings).
 - `<app-avatar [src] [name] [size]>` – repository owner avatar with a letter fallback.
 - `relativeTime` pipe – “in 5 minutes” / “3 hours ago”; pass the shell's `now()` signal so values tick.
+- `appBackdropClose` directive on a `<dialog>` – light dismiss: sets `closedby="any"` (the browser closes the dialog and
+  fires `close`); where that is unsupported (Safari), `(backdropClose)` fires when press and release both happen on the backdrop.
 
 ### 3.5 Interaction patterns
 
@@ -187,8 +191,9 @@ Shared components in `web/src/app/shared/`:
   *Backup first*). No `window.confirm()`.
 - **Dialogs:** native `<dialog>` opened with `showModal()` from an `effect()` on an input signal
   (`input<T | null>` – `null` closes), `saved` / `closed` outputs, backdrop click closes
-  (`onDialogClick`), structure `.dialog > .dialog-card > .dialog-head / .dialog-body / .dialog-foot`,
-  grouped fields in `fieldset.group` with a `legend`. Footer: ghost *Cancel* left of the primary *Save* (`Save` / `Save container` – name the object when the dialog has several forms).
+  (`appBackdropClose` – not a bare `(click)`, which also fires when a text selection ends outside the dialog), structure `.dialog > .dialog-card > .dialog-head / .dialog-body / .dialog-foot`,
+  grouped fields in `fieldset.group` with a `legend`. Dialogs and their `::backdrop` set
+  `overscroll-behavior: contain` (the backdrop also `overflow: hidden`) so scrolling never moves the page underneath. Footer: ghost *Cancel* left of the primary *Save* (`Save` / `Save container` – name the object when the dialog has several forms).
 - **Filters:** `.tabs` with `role="tab"` buttons and counters (`.tab-count`, `.danger` when errors > 0).
 - **Secrets in forms:** password input + *Show/Hide* ghost button; placeholder shows the masked saved value;
   hint says “Leave empty to keep the current one.”
