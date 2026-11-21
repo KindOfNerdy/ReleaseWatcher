@@ -4,6 +4,10 @@ import {
   advisoriesDue,
   ADVISORY_REFRESH_INTERVAL_MS,
   advisoryAffects,
+  advisoryImpact,
+  effectiveRange,
+  normalizeRange,
+  installedVersions,
   normalizeSeverity,
   sortAdvisories,
   summarizeAdvisories,
@@ -52,15 +56,90 @@ describe('advisoryAffects', () => {
   });
 });
 
+describe('range notations (louislam/uptime-kuma advisories)', () => {
+  it('normalizes them to the GitHub syntax', () => {
+    assert.equal(normalizeRange('>= 2.0.0 && <= 2.1.3 '), '>= 2.0.0, <= 2.1.3');
+    assert.equal(normalizeRange('<=2.5.3'), '<= 2.5.3');
+    assert.equal(normalizeRange('>= 1.0.0 < 2.0.0'), '>= 1.0.0, < 2.0.0');
+    assert.equal(normalizeRange('1.23.0 - 1.23.15'), '>= 1.23.0, <= 1.23.15');
+    assert.equal(normalizeRange('2.0.0-beta.0, 2.0.0-beta.1'), '= 2.0.0-beta.0 || = 2.0.0-beta.1');
+    assert.equal(normalizeRange('*'), '>= 0');
+    assert.equal(normalizeRange('>= 1.0.0, < 1.5.0 || == 2.0.0'), '>= 1.0.0, < 1.5.0 || = 2.0.0');
+  });
+
+  it('compares versions with them', () => {
+    assert.equal(versionInRange('2.5.12', '>= 2.0.0 && <= 2.1.3'), false);
+    assert.equal(versionInRange('2.1.0', '>= 2.0.0 && <= 2.1.3'), true);
+    assert.equal(versionInRange('2.5.12', '<=2.5.3'), false);
+    assert.equal(versionInRange('1.23.10', '1.23.0 - 1.23.15'), true);
+    assert.equal(versionInRange('1.23.16', '1.23.0 - 1.23.15'), false);
+    assert.equal(versionInRange('2.0.0-beta.1', '2.0.0-beta.0, 2.0.0-beta.1'), true);
+    assert.equal(versionInRange('2.0.0', '2.0.0-beta.0, 2.0.0-beta.1'), false);
+    assert.equal(versionInRange('2.5.12', '*'), true);
+    assert.equal(versionInRange('1.23.3', '<= v1.23.2'), false);
+  });
+
+  it('does not flag 2.5.12 for GHSA-c7hf-c5p5-5g6h', () => {
+    const a = advisory('GHSA-c7hf-c5p5-5g6h', 1, null, {
+      vulnerabilities: [{ packageName: 'uptime-kuma', vulnerableRange: '>= 2.0.0 && <= 2.1.3 ', patchedVersions: '2.2.0' }],
+    });
+    assert.equal(advisoryAffects(a, '2.5.12'), false);
+    assert.equal(advisoryAffects(a, '2.1.3'), true);
+  });
+});
+
+describe('patched versions', () => {
+  it('cap a vulnerable range without an upper bound', () => {
+    assert.equal(effectiveRange('>= 0.104.0', '0.135.0'), '>= 0.104.0, < 0.135.0');
+    assert.equal(effectiveRange('>= 0.35.0', '>= 0.120.0'), '>= 0.35.0, < 0.120.0');
+    assert.equal(effectiveRange('>= 0.1.0', '>0.45.0'), '>= 0.1.0, <= 0.45.0');
+    assert.equal(effectiveRange('>= 1.0.0, < 1.5.0', '1.4.0'), '>= 1.0.0, < 1.5.0');
+    assert.equal(effectiveRange('< 1.0.0 || >= 2.0.0', '2.3.0'), '< 1.0.0 || >= 2.0.0, < 2.3.0');
+    assert.equal(effectiveRange('>= 1.0.0', null), '>= 1.0.0');
+    assert.equal(effectiveRange('>= 1.0.0', '1.2.5, 2.0.3'), '>= 1.0.0');
+  });
+
+  it('do not flag versions at or above the fix (clidey/whodb GHSA-x3h5-pr45-fx4r)', () => {
+    const a = advisory('GHSA-x3h5-pr45-fx4r', 1, '>= 0.104.0', {
+      vulnerabilities: [{ packageName: 'github.com/clidey/whodb/core', vulnerableRange: '>= 0.104.0', patchedVersions: '0.135.0' }],
+    });
+    assert.equal(advisoryAffects(a, '0.139.0'), false);
+    assert.equal(advisoryAffects(a, '0.135.0'), false);
+    assert.equal(advisoryAffects(a, '0.134.2'), true);
+    assert.equal(advisoryAffects(a, '0.103.0'), false);
+    const unfixed = advisory('GHSA-open', 1, '>= 1.0.0', {
+      vulnerabilities: [{ packageName: 'app', vulnerableRange: '>= 1.0.0', patchedVersions: null }],
+    });
+    assert.equal(advisoryAffects(unfixed, '9.0.0'), true);
+  });
+});
+
+describe('installed versions', () => {
+  it('combines the own version with those of linked container apps', () => {
+    assert.deepEqual(installedVersions(null), []);
+    assert.deepEqual(installedVersions(' 1.0.0 ', ['1.0.0', null, '', '1.1.0']), ['1.0.0', '1.1.0']);
+    assert.deepEqual(installedVersions(null, ['2.0.0']), ['2.0.0']);
+  });
+
+  it('is affected when any version is, safe only when every version is known to be safe', () => {
+    const a = advisory('GHSA-a', 1, '< 2.0.0');
+    assert.deepEqual(advisoryImpact(a, []), { affects: null, affectedVersions: [] });
+    assert.deepEqual(advisoryImpact(a, ['2.1.0', '1.5.0']), { affects: true, affectedVersions: ['1.5.0'] });
+    assert.deepEqual(advisoryImpact(a, ['2.1.0', '3.0.0']), { affects: false, affectedVersions: [] });
+    assert.deepEqual(advisoryImpact(a, ['2.1.0', 'latest']), { affects: null, affectedVersions: [] });
+  });
+});
+
 describe('summaries', () => {
   it('counts affecting advisories and picks the highest relevant severity', () => {
     const list = [
       advisory('GHSA-crit', 1, '< 1.0.0', { severity: 'critical' }),
       advisory('GHSA-low', 2, '< 3.0.0', { severity: 'low' }),
     ];
-    assert.deepEqual(summarizeAdvisories(list, '2.0.0'), { total: 2, affecting: 1, highestSeverity: 'low' });
-    assert.deepEqual(summarizeAdvisories(list, '5.0.0'), { total: 2, affecting: 0, highestSeverity: 'critical' });
-    assert.deepEqual(summarizeAdvisories([], null), { total: 0, affecting: 0, highestSeverity: null });
+    assert.deepEqual(summarizeAdvisories(list, ['2.0.0']), { total: 2, affecting: 1, highestSeverity: 'low' });
+    assert.deepEqual(summarizeAdvisories(list, ['5.0.0']), { total: 2, affecting: 0, highestSeverity: 'critical' });
+    assert.deepEqual(summarizeAdvisories(list, ['5.0.0', '0.9.0']), { total: 2, affecting: 2, highestSeverity: 'critical' });
+    assert.deepEqual(summarizeAdvisories([], []), { total: 0, affecting: 0, highestSeverity: null });
   });
 
   it('sorts newest first', () => {

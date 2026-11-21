@@ -74,13 +74,43 @@ const SEVERITY_RANK: Record<AdvisorySeverity, number> = { critical: 4, high: 3, 
 export const compareSeverity = (a: AdvisorySeverity, b: AdvisorySeverity): number => SEVERITY_RANK[a] - SEVERITY_RANK[b];
 
 const CONSTRAINT_PATTERN = /^(>=|<=|>|<|=|==)?\s*(.+)$/;
+const CONSTRAINT_TOKENS = /(>=|<=|==|>|<|=)?\s*([^\s<>=,]+)/g;
+
+/**
+ * Brings the range notations found in advisories into the GitHub syntax (`, ` = and, ` || ` = or, explicit
+ * operators): ">= 2.0.0 && <= 2.1.3" (&&), ">= 1.0 < 2.0" (no separator), "1.23.0 - 1.23.15" (hyphen range),
+ * "2.0.0-beta.0, 2.0.0-beta.1" (list of versions) and "*" (all versions).
+ */
+export function normalizeRange(range: string): string {
+  return range
+    .split('||')
+    .map((alternative) => {
+      const text = alternative.replaceAll('&&', ',').trim();
+      if (text === '*') {
+        return '>= 0';
+      }
+      const hyphen = text.match(/^(\S+)\s+-\s+(\S+)$/);
+      if (hyphen) {
+        return `>= ${hyphen[1]}, <= ${hyphen[2]}`;
+      }
+      const parts = text.split(',').map((part) => part.trim()).filter(Boolean);
+      if (parts.length > 1 && parts.every((part) => !/^[<>=]/.test(part))) {
+        return parts.map((part) => `= ${part}`).join(' || ');
+      }
+      return parts
+        .flatMap((part) => [...part.matchAll(CONSTRAINT_TOKENS)].map((m) => `${m[1] === '==' ? '=' : (m[1] ?? '=')} ${m[2]}`))
+        .join(', ');
+    })
+    .filter(Boolean)
+    .join(' || ');
+}
 
 /**
  * Checks a version against a GitHub range such as "< 1.2.3", ">= 1.0, < 1.5" or "= 2.0.0". Comma-separated parts
  * must all match; "||" separates alternatives. Returns null when the version or the range can't be compared.
  */
 export function versionInRange(version: string, range: string): boolean | null {
-  const alternatives = range.split('||').map((part) => part.trim()).filter(Boolean);
+  const alternatives = normalizeRange(range).split('||').map((part) => part.trim()).filter(Boolean);
   if (alternatives.length === 0) {
     return null;
   }
@@ -119,6 +149,37 @@ function matchesAll(version: string, constraints: string): boolean | null {
 }
 
 /**
+ * Upper bound implied by the first patched version: "1.2.3" or ">= 1.2.3" → "< 1.2.3", "> 1.2.3" → "<= 1.2.3".
+ * Null when there is no fix or the value lists several versions.
+ */
+function patchedBound(patchedVersions: string | null): string | null {
+  const patched = patchedVersions?.trim();
+  if (!patched || patched.includes(',') || patched.includes('||')) {
+    return null;
+  }
+  const match = patched.match(/^(>=|>|=|==)?\s*(\S+)$/);
+  if (!match?.[2]) {
+    return null;
+  }
+  return `${match[1] === '>' ? '<=' : '<'} ${match[2]}`;
+}
+
+/**
+ * The vulnerable range, capped by the patched version where the range has no upper bound. Advisories often say
+ * ">= 0.104.0" with "patched: 0.135.0", which would otherwise flag every newer version as vulnerable.
+ */
+export function effectiveRange(vulnerableRange: string, patchedVersions: string | null): string {
+  const bound = patchedBound(patchedVersions);
+  if (!bound) {
+    return vulnerableRange;
+  }
+  return normalizeRange(vulnerableRange)
+    .split('||')
+    .map((alternative) => (alternative.includes('<') ? alternative.trim() : [alternative.trim(), bound].filter(Boolean).join(', ')))
+    .join(' || ');
+}
+
+/**
  * Does the advisory affect `version`? True/false when at least one vulnerable range could be compared, null when the
  * version is unknown or no range is usable.
  */
@@ -133,7 +194,7 @@ export function advisoryAffects(advisory: Pick<SecurityAdvisory, 'vulnerabilitie
       unknown = true;
       continue;
     }
-    const result = versionInRange(version, vulnerability.vulnerableRange);
+    const result = versionInRange(version, effectiveRange(vulnerability.vulnerableRange, vulnerability.patchedVersions));
     if (result === true) {
       return true;
     }
@@ -146,6 +207,36 @@ export function advisoryAffects(advisory: Pick<SecurityAdvisory, 'vulnerabilitie
   return compared && !unknown ? false : null;
 }
 
+/**
+ * Installed versions an advisory is compared with: the repository's own installed version (installed-version URL)
+ * plus the versions read from container apps linked to the repository. Trimmed, without blanks and duplicates.
+ */
+export function installedVersions(own: string | null, linked: readonly (string | null)[] = []): string[] {
+  const versions = new Set<string>();
+  for (const version of [own, ...linked]) {
+    const trimmed = version?.trim();
+    if (trimmed) {
+      versions.add(trimmed);
+    }
+  }
+  return [...versions];
+}
+
+/** Impact of an advisory on every installed version of a repository. */
+export interface AdvisoryImpact {
+  /** True when any installed version is affected, false when all are known to be safe, otherwise null. */
+  affects: boolean | null;
+  affectedVersions: string[];
+}
+
+export function advisoryImpact(advisory: Pick<SecurityAdvisory, 'vulnerabilities'>, versions: readonly string[]): AdvisoryImpact {
+  const results = versions.map((version) => ({ version, affects: advisoryAffects(advisory, version) }));
+  const affectedVersions = results.filter((r) => r.affects === true).map((r) => r.version);
+  const affects =
+    affectedVersions.length > 0 ? true : results.length > 0 && results.every((r) => r.affects === false) ? false : null;
+  return { affects, affectedVersions };
+}
+
 /** Aggregate shown next to a repository. */
 export interface AdvisorySummary {
   total: number;
@@ -155,8 +246,8 @@ export interface AdvisorySummary {
   highestSeverity: AdvisorySeverity | null;
 }
 
-export function summarizeAdvisories(advisories: readonly SecurityAdvisory[], installedVersion: string | null): AdvisorySummary {
-  const affecting = advisories.filter((a) => advisoryAffects(a, installedVersion) === true);
+export function summarizeAdvisories(advisories: readonly SecurityAdvisory[], versions: readonly string[]): AdvisorySummary {
+  const affecting = advisories.filter((a) => advisoryImpact(a, versions).affects === true);
   const relevant = affecting.length > 0 ? affecting : advisories;
   const highestSeverity = relevant.reduce<AdvisorySeverity | null>(
     (highest, a) => (highest === null || compareSeverity(a.severity, highest) > 0 ? a.severity : highest),

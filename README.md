@@ -137,9 +137,16 @@ reads them). **Settings → General → Vulnerability sources** switches each so
 
 - Vulnerabilities reported by both sources (same GHSA/CVE id) are listed once. Withdrawn ones are dropped; switching a
   source off removes its entries.
-- The vulnerable range (e.g. `>= 1.0.0, < 1.32.1`) is compared with the **installed version**. The **Vulnerabilities**
+- The vulnerable range (e.g. `>= 1.0.0, < 1.32.1`) is compared with the **installed versions**: the one read from the
+  repository's installed-version URL plus those read by the *version command* of every container app linked to the
+  repository (*latest version from* a watched GitHub repository). A vulnerability affects the installation when any of
+  these versions is in range; without any version its impact is shown as *Installed version unknown*. A range without
+  an upper bound (e.g. `>= 0.104.0`) is capped by the patched version (`0.135.0` → `>= 0.104.0, < 0.135.0`), so newer
+  versions are not flagged. Other notations used in advisories are understood too: `>= 2.0.0 && <= 2.1.3`,
+  `1.23.0 - 1.23.15`, lists of versions (`2.0.0-beta.0, 2.0.0-beta.1`) and `*` (all versions). The **Vulnerabilities**
   page lists all of them – affecting the installed version first – with severity, CVSS score, ids, vulnerable and
-  patched versions, filters (impact, severity, source) and search; the sidebar counts those affecting an installed
+  patched versions, filters (impact, severity, source) and search. It opens on *Affects installed* (or *All* when
+  nothing affects an installed version); the sidebar counts those affecting an installed
   version. Each repository also shows a badge (red *N vulnerabilities affect installed* / grey *N advisories*) that
   opens its list, and the *Vulnerable* filter tab.
 - As with releases, the first read of each source (and of a newly set OSV.dev package) only stores a baseline.
@@ -506,8 +513,8 @@ return `202 Accepted` with a run you can poll at `GET /api/runs/:id`.
 | `PUT` | `/api/repositories/:id` | `{ "includePrereleases", "isEnabled", "installedVersionUrl"?, "installedVersionField"?, "installedVersionHeaders"?: [{ "name", "value" }], "githubToken"?, "osvEcosystem"?, "osvPackage"? }` – a header with `value: null` keeps the saved value; `githubToken` and the OSV.dev package: omit = keep, `null` = remove |
 | `DELETE` | `/api/repositories/:id` | Stop watching |
 | `POST` | `/api/repositories/:id/check` | Check immediately (including security advisories) |
-| `GET` | `/api/repositories/:id/advisories` | Vulnerabilities of the repository, newest first, with `source` (`github`/`osv`) and `affectsInstalled` (`true`/`false`/`null` when unknown) |
-| `GET` | `/api/advisories` | Vulnerabilities of all repositories, each with its `repository` (Vulnerabilities page) |
+| `GET` | `/api/repositories/:id/advisories` | Vulnerabilities of the repository, newest first, with `source` (`github`/`osv`), `affectsInstalled` (`true` when any installed version is affected, `false` when all are safe, `null` when unknown) and `affectedVersions` |
+| `GET` | `/api/advisories` | Vulnerabilities of all repositories, each with its `repository` (incl. `installedVersions`: own version + linked container apps) (Vulnerabilities page) |
 | `POST` | `/api/installed-version/test` | `{ "url", "field": null, "headers": [], "repositoryId"? }` → detected version and response preview |
 | `POST` | `/api/check-all` | Check all active repositories now |
 | `GET` | `/api/notifiers` | Registered notifiers (`discord`, `email`) and whether they are configured |
