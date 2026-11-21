@@ -365,6 +365,9 @@
 
   .ct-list-wrap,
   .detail {
+    /* Positioned, so absolutely positioned children (e.g. `.visually-hidden`) scroll with the pane
+       instead of stretching the page. */
+    position: relative;
     max-height: 100%;
     overflow-y: auto;
     scrollbar-width: thin;
@@ -420,6 +423,36 @@
 
   &.paused .ct-text {
     opacity: 0.6;
+  }
+}
+
+// Choosing containers for "Update": a checkbox left of each row.
+.picking {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+
+  .ct-item {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+.pick {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+
+  input {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    accent-color: var(--accent);
+    cursor: pointer;
   }
 }
 
