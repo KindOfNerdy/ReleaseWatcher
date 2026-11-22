@@ -11,7 +11,7 @@ Get notified about new GitHub releases and keep your Proxmox LXC containers up t
 [![Bun](https://img.shields.io/badge/Bun-1.4-000000?logo=bun&logoColor=white)](https://bun.sh)
 [![Angular](https://img.shields.io/badge/Angular-22-dd0031?logo=angular&logoColor=white)](https://angular.dev)
 [![Docker](https://img.shields.io/badge/ghcr.io-releasewatcher-2496ed?logo=docker&logoColor=white)](#docker)
-[![Proxmox](https://img.shields.io/badge/Proxmox-LXC-e57000?logo=proxmox&logoColor=white)](#proxmox-lxc-containers)
+[![Proxmox](https://img.shields.io/badge/Proxmox-LXC-e57000?logo=proxmox&logoColor=white)](#machines-proxmox-guests-and-servers)
 
 [Features](#features) · [Quick start](#quick-start) · [Installation](#installation) · [Configuration](#configuration) ·
 [API](#api) · [Development](#development)
@@ -68,7 +68,7 @@ Get notified about new GitHub releases and keep your Proxmox LXC containers up t
     <td width="50%">
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset="docs/images/containers-dark.png">
-        <img src="docs/images/containers-light.png" alt="Containers page with pending apt packages and application updates">
+        <img src="docs/images/containers-light.png" alt="Machines page with pending apt packages and application updates">
       </picture>
       <p align="center"><sub>Containers – pending apt packages and application updates</sub></p>
     </td>
@@ -95,8 +95,11 @@ docker logs releasewatcher 2>&1 | grep setupCode    # one-time code to create yo
 Open <http://localhost:8080>, create the account with the setup code, then:
 
 1. **Settings → Notifications** – add a Discord webhook and/or SMTP server and send a test message.
-2. **Settings → General** – add a GitHub token (recommended) and, for containers, your Proxmox node.
+2. **Settings → General** – add a GitHub token (recommended); for containers add an SSH key and your Proxmox node
+   under **Settings → Connections**.
 3. **Repositories** – add the repositories you want to watch.
+4. **Machines** – add the containers of your Proxmox node(s) and your servers to watch their apt packages and
+   applications.
 
 > [!NOTE]
 > If the image is private, log in first with `docker login ghcr.io` (a GitHub token with `read:packages`).
@@ -159,18 +162,47 @@ digest mode they send one summary together. **Settings → General → Vulnerabi
   installed version is known not to be affected.
 - A failed read is shown on the repository (per source) and never marks the release check as failed.
 
-### Proxmox LXC containers
+### Machines: Proxmox guests and servers
+
+The **Machines** page lists everything watched over SSH – guests of one or more Proxmox nodes, the nodes themselves
+and servers – grouped by host when there is more than one (the old `/containers` address redirects there).
 
 <details>
 <summary><b>Connecting the node</b></summary>
 
-In **Settings → General → Proxmox node** enter the host, SSH user (`root`, or a user allowed to run `pct` through
-passwordless `sudo`) and the **private key**. Only public-key authentication is used (no passwords, no agent, no
-keys with a passphrase). The node's host key is trusted on the first connection and pinned in `known_hosts` next to
-the database. **Test connection** verifies the setup.
+Connections live in **Settings → Connections**:
+
+- **SSH keys** – named private keys, shared by any number of hosts (one key for every machine, or one per machine).
+  **Generate key** creates an Ed25519 key pair on the server and shows its public key to copy into
+  `~/.ssh/authorized_keys`; **Add key** pastes an existing private key. Private keys are encrypted at rest and never
+  returned; keys with a passphrase are not supported. A key used by a host cannot be removed.
+- **Hosts** – **Add host** opens one dialog for both kinds: pick *Server* or *Proxmox node* (as many nodes as you
+  have), then its address, port, SSH user (`root`, or a user allowed
+  to run `pct`/`qm` through passwordless `sudo`) and one of the keys; each node has its own backup storage
+  (**Edit** → *Backup storage*; none = no backups before updates of its guests). The Machines page picks the node to add guests from. **Test connection** runs `pveversion` on it. A host key is trusted
+  on the first connection and pinned in `known_hosts` next to the database; **Forget host key** removes the pinned key
+  after the machine was reinstalled.
+
+Only public-key authentication is used (no passwords, no agent). A Proxmox node configured by an older version (in
+Settings or through `PROXMOX_*` variables) is moved into a host with a key named *Proxmox node* on the first start.
 
 Tip: restrict the key on the node to ReleaseWatcher's IP (`from="<ip>"` in `authorized_keys`) and use a key
 dedicated to it.
+
+</details>
+
+<details>
+<summary><b>Servers (VPS and other Linux machines)</b></summary>
+
+A server is any Debian/Ubuntu machine reachable over SSH – no Proxmox needed. **Add server** (Machines page) or
+**Add host** → *Server* (Settings → Connections) takes its address, port, user and SSH key; it is watched right away:
+
+- Commands run directly on the server (`sh -lc` over SSH; a user other than `root` needs passwordless `sudo`).
+- apt is checked with `apt list --upgradable` and upgraded with `apt-get upgrade` (not `dist-upgrade`), without a
+  backup. Applications work like in containers (version, latest version, update command, detection).
+- **Restart server** schedules `systemctl reboot`, waits until the server answers over SSH again and checks it. It
+  waits for running checks and updates of that server first.
+- Removing the server on the Machines page also removes its host (and the other way round); its SSH key stays.
 
 </details>
 
@@ -236,12 +268,12 @@ dedicated to it.
 
 - **Updates are manual only.** The console output is shown live and kept in the run history (last 50 runs per
   container). Only one task runs in a container at a time.
-- **Update** (Containers page) first shows checkboxes in the list, with every container that has pending updates
+- **Update** (Machines page) first shows checkboxes in the list, with every container that has pending updates
   ticked; a second click updates the ticked containers one after another: apt
   first, then applications. The Proxmox host and stopped containers that may not be started are left out; a failed
   update skips the rest of that container. A container with several pending updates has its own **Update all (n)**.
-- **Backups before updates:** choose a backup storage (e.g. Proxmox Backup Server or `local`) and a default in
-  Settings; containers can override it and every confirmation has a **Backup first** checkbox. The backup is a
+- **Backups before updates:** choose the backup storage of each node (e.g. Proxmox Backup Server or `local`, in
+  Settings → Connections → node → Edit) and a default in Settings → Containers; containers can override it and every confirmation has a **Backup first** checkbox. The backup is a
   `vzdump` in snapshot mode (zstd, except on PBS); retention follows the storage's prune settings; a failed backup
   stops the update.
 - **Resilient runs:** backups, upgrades and updates run on the node as transient systemd units
@@ -325,7 +357,7 @@ keeps the configuration, the account and the data.
 
 | Option | Description |
 | --- | --- |
-| `--node <host>`, `--user`, `--port` | the node to connect to; default to **Settings → Proxmox node** of your local instance |
+| `--node <host>`, `--user`, `--port` | the node to connect to; default to the Proxmox host in **Settings → Connections** of your local instance |
 | `--identity <key file>` | SSH key for the node; default: your normal ssh setup (`~/.ssh`, agent, `~/.ssh/config`). On Windows the system OpenSSH client is used, so keys in the Windows ssh-agent work |
 | `--db` | also copy your local database when the container has none yet |
 | `--force-db` | replace an existing database in the container |
@@ -373,7 +405,7 @@ Open `http://<container-ip>:8080`. Logs: `journalctl -u releasewatcher -f` (JSON
 - **Update:** replace `/opt/releasewatcher/releasewatcher` and `systemctl restart releasewatcher` (migrations run on
   start). Keep the old file to roll back.
 - **Version:** `releasewatcher --version` prints the installed version and exits – use it as the *version command*
-  when ReleaseWatcher's own container is on the Containers page.
+  when ReleaseWatcher's own container is on the Machines page.
 - **SSH key as a file:** `install -m 640 -g releasewatcher id_ed25519 /etc/releasewatcher/proxmox_key` and set
   `PROXMOX_SSH_KEY_FILE=/etc/releasewatcher/proxmox_key`.
 - **Backup:** `/var/lib/releasewatcher` (SQLite in WAL mode – stop the service or copy all `releasewatcher.db*`
@@ -482,14 +514,14 @@ in SQLite, apply immediately and override the environment; clearing a value fall
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `PROXMOX_HOST` | – | Proxmox node. Empty = containers disabled. |
-| `PROXMOX_SSH_PORT` | `22` | SSH port of the node. |
-| `PROXMOX_SSH_USER` | `root` | SSH user; non-root users need passwordless `sudo` for `pct`. |
-| `PROXMOX_SSH_KEY_FILE` | – | Path to the private key (read at start; the key can also be pasted in the UI). |
+| `PROXMOX_HOST` | – | Proxmox node, read **once** on the first start of a database: it becomes a host in **Settings → Connections** (edited there afterwards). |
+| `PROXMOX_SSH_PORT` | `22` | SSH port of that node (first start only). |
+| `PROXMOX_SSH_USER` | `root` | SSH user of that node (first start only); non-root users need passwordless `sudo` for `pct`. |
+| `PROXMOX_SSH_KEY_FILE` | – | Private key of that node (first start only; saved as the key *Proxmox node*). |
 | `SSH_KNOWN_HOSTS_FILE` | `<database dir>/known_hosts` | Pinned host keys (trust on first use). |
 | `CONTAINER_CHECK_CRON` | `0 */6 * * *` | Default check schedule (5-field cron, `@daily`, …). |
 | `CONTAINER_CHECK_CONCURRENCY` | `3` | Containers checked at the same time (1–10). |
-| `PROXMOX_BACKUP_STORAGE` | – | Storage for `vzdump` backups made before updates. |
+| `PROXMOX_BACKUP_STORAGE` | – | Storage for `vzdump` backups made before updates, read **once**: given to the Proxmox nodes without their own storage (edited per node in **Settings → Connections** afterwards). |
 | `BACKUP_BEFORE_UPDATE` | `false` | Back up before updates by default. |
 
 </details>
@@ -554,10 +586,20 @@ return `202 Accepted` with a run you can poll at `GET /api/runs/:id`.
 
 | Method | Route | Description |
 | --- | --- | --- |
-| `POST` | `/api/proxmox/test` | Connect to the node, returns `pveversion` output |
+| `GET` | `/api/ssh-keys` | Named SSH keys: name, public key, fingerprint, `hostCount` (never the private key) |
+| `POST` | `/api/ssh-keys` | Add a key `{ name, privateKey }` (checked with `ssh-keygen`) |
+| `POST` | `/api/ssh-keys/generate` | Create an Ed25519 key pair `{ name }`; returns the public key |
+| `PUT` | `/api/ssh-keys/:id` | Rename `{ name }` |
+| `DELETE` | `/api/ssh-keys/:id` | Remove a key (`409` while a host uses it) |
+| `GET` | `/api/hosts` | Hosts (`type`: `proxmox` / `server`) with address, port, user, key, `configured`, `targetCount` |
+| `POST` | `/api/hosts` | Add a host `{ type, name?, address, port?, user?, sshKeyId? }`; a `server` gets its target right away |
+| `GET` / `PUT` / `DELETE` | `/api/hosts/:id` | One host; partial update (omitted = keep); delete (a server's target goes with it; a Proxmox node: `409` while it has watched machines) |
+| `POST` | `/api/hosts/:id/test` | Connect and return `pveversion` (Proxmox) or `uname -a` |
+| `POST` | `/api/hosts/:id/forget-host-key` | Remove the pinned SSH host key (after a reinstall) |
+| `POST` | `/api/proxmox/test` | Connect to the Proxmox node, returns `pveversion` output. Like the other `/api/proxmox/*` routes and `POST /api/containers/node` / `add-all`, it takes `?hostId=` (default: the first node); `POST /api/containers` takes `hostId` in the body |
 | `GET` | `/api/proxmox/containers` | Containers (`pct list`) and virtual machines (`qm list`) on the node with `kind` (`lxc` / `vm`) and an `added` flag |
-| `GET` | `/api/proxmox/storages` | Storages that accept backups |
-| `GET` | `/api/containers` | Added containers with applications, pending updates, `restartReasons`, `isBusy` and `activeRunId` |
+| `GET` | `/api/proxmox/storages` | Storages of a node (`?hostId=`) that accept backups |
+| `GET` | `/api/containers` | Watched targets (`kind`: `lxc`, `vm`, `node`, `server`) with `hostId`, `hostName`, `configured`, `capabilities`, applications, pending updates, `restartReasons`, `isBusy` and `activeRunId` |
 | `POST` | `/api/containers` | `{ "vmid": 101, "name"? }` – add a container or virtual machine and start a check |
 | `POST` | `/api/containers/node` | Add the Proxmox host itself (`409` when already added) |
 | `POST` | `/api/containers/add-all` | Add every container of the node not added yet (virtual machines are added one by one) |

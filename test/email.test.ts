@@ -261,9 +261,9 @@ describe('buildEmail', () => {
     { type: 'release', release: { owner: 'acme', repository: 'widget', release: release('v1.2.3', 1), installedVersion: 'v1.2.2' } },
     {
       type: 'container-updates',
-      updates: { vmid: 105, containerName: 'cloud', apps: [{ name: 'Nextcloud', installedVersion: '29.0.1', latestVersion: '29.0.2' }], aptPackages: [] },
+      updates: { vmid: 105, targetKind: 'lxc', containerName: 'cloud', apps: [{ name: 'Nextcloud', installedVersion: '29.0.1', latestVersion: '29.0.2' }], aptPackages: [] },
     },
-    { type: 'update-result', result: { vmid: 105, containerName: 'cloud', kind: 'app-update', appName: 'Nextcloud', succeeded: false, detail: 'Update failed – exit code 1' } },
+    { type: 'update-result', result: { vmid: 105, targetKind: 'lxc', containerName: 'cloud', kind: 'app-update', appName: 'Nextcloud', succeeded: false, detail: 'Update failed – exit code 1' } },
   ];
 
   it('builds a single notification', () => {
@@ -281,7 +281,7 @@ describe('buildEmail', () => {
     assert.equal(mail.subject, 'ReleaseWatcher: 2 new releases, 1 container with updates, 1 update failed');
     assert.match(mail.text, /CT 105 \(cloud\): updates available\n\nNextcloud: 29\.0\.1 → 29\.0\.2/);
     assert.match(mail.text, /CT 105 \(cloud\): update of Nextcloud failed\nUpdate failed – exit code 1/);
-    assert.match(mail.text, /Containers: https:\/\/rw\.example\.com\/containers/);
+    assert.match(mail.text, /Machines: https:\/\/rw\.example\.com\/machines/);
     assert.equal(mail.html.includes('<script>'), false);
     assert.match(mail.html, /x&lt;script&gt;/);
   });

@@ -143,15 +143,10 @@ export interface AppSettings {
     advisoryCronSource: SettingSource;
   };
   proxmox: {
-    /** True when host and SSH key are set. */
+    /** True when a Proxmox node is added (Settings → Connections) and has an SSH key. */
     configured: boolean;
-    host: string | null;
-    hostSource: SettingSource;
-    port: number;
-    user: string;
-    /** The key itself is never returned. */
-    sshKeyConfigured: boolean;
-    sshKeySource: SettingSource;
+    /** Proxmox nodes guests can be added from (the first one is the default). */
+    nodes: ProxmoxNode[];
     checkCron: string;
     checkCronSource: SettingSource;
     /** How many containers are checked at the same time. */
@@ -159,9 +154,6 @@ export interface AppSettings {
     checkConcurrencySource: SettingSource;
     minCheckConcurrency: number;
     maxCheckConcurrency: number;
-    /** Storage that receives backups (vzdump) made before updates. */
-    backupStorage: string | null;
-    backupStorageSource: SettingSource;
     /** Back up before updates by default (containers can override, every update can change it). */
     backupBeforeUpdate: boolean;
     backupBeforeUpdateSource: SettingSource;
@@ -217,10 +209,6 @@ export interface SettingsPatch {
   githubToken?: string | null;
   releaseCheckCron?: string | null;
   advisoryCheckCron?: string | null;
-  proxmoxHost?: string | null;
-  proxmoxPort?: number | null;
-  proxmoxUser?: string | null;
-  proxmoxSshKey?: string | null;
   smtpHost?: string | null;
   smtpPort?: number | null;
   smtpSecurity?: SmtpSecurity | null;
@@ -239,7 +227,6 @@ export interface SettingsPatch {
   advisoriesOsv?: boolean | null;
   containerCheckCron?: string | null;
   containerCheckConcurrency?: number | null;
-  backupStorage?: string | null;
   backupBeforeUpdate?: boolean | null;
 }
 
@@ -419,13 +406,39 @@ export interface HomeAssistantInfo {
   tokenMasked: string | null;
 }
 
+/** What ReleaseWatcher can do with a target – the UI branches on these instead of on `kind`. */
+export interface TargetCapabilities {
+  /** How the target is backed up before updates; null = it cannot be backed up. */
+  backup: 'vzdump' | null;
+  /** Can be started and shut down ("Start temporarily when stopped"). */
+  power: boolean;
+  /** apt can be switched off (false = always on). */
+  aptOptional: boolean;
+  /** CPU cores and memory can be raised for updates. */
+  updateResources: boolean;
+  /** Applications can be added and detected. */
+  apps: boolean;
+  /** Home Assistant OS may run here. */
+  homeAssistant: boolean;
+  /** Included in "Update all". */
+  updateAll: boolean;
+  /** `guest` = rebooted by the node; `machine` = the machine itself reboots (restart is only scheduled). */
+  restart: 'guest' | 'machine';
+}
+
 export interface Container {
   id: number;
+  /** Host the target is reached through (its Proxmox node, or the server itself); null = not assigned. */
+  hostId: number | null;
+  hostName: string | null;
+  /** Its host has an SSH key, so checks and updates can run. */
+  configured: boolean;
   /**
    * `lxc` = a container, `vm` = a virtual machine (commands through the QEMU guest agent),
-   * `node` = the Proxmox host itself (apt only, vmid 0).
+   * `node` = the Proxmox host itself (apt only, vmid 0), `server` = a plain Linux machine reached over SSH.
    */
-  kind: 'lxc' | 'vm' | 'node';
+  kind: 'lxc' | 'vm' | 'node' | 'server';
+  capabilities: TargetCapabilities;
   vmid: number;
   name: string;
   isEnabled: boolean;
@@ -434,6 +447,8 @@ export interface Container {
   backupBeforeUpdate: boolean | null;
   /** The value in effect for this container (own setting or the global default). */
   effectiveBackupBeforeUpdate: boolean;
+  /** Storage its backups go to (its node's, else the global one); null = no backups possible or none chosen. */
+  backupStorage: string | null;
   /** Started temporarily for checks and updates when stopped, shut down again afterwards. */
   startWhenStopped: boolean;
   /** Overrides the global schedule; null = global. */
@@ -564,4 +579,58 @@ export interface AccountUpdate {
   currentPassword: string;
   username?: string | null;
   newPassword?: string | null;
+}
+
+/** A named SSH key; the private part never leaves the server. */
+export interface SshKey {
+  id: number;
+  name: string;
+  /** `ssh-ed25519 AAAA… comment` – to add to `authorized_keys`; null when it could not be derived. */
+  publicKey: string | null;
+  /** `SHA256:…`; null when it could not be derived. */
+  fingerprint: string | null;
+  /** Hosts that log in with this key. */
+  hostCount: number;
+  createdAt: string;
+}
+
+/** `proxmox` = a Proxmox VE node; `server` = a plain Linux machine. */
+export type HostType = 'proxmox' | 'server';
+
+/** A machine reached over SSH. */
+export interface Host {
+  id: number;
+  type: HostType;
+  name: string;
+  address: string;
+  port: number;
+  user: string;
+  sshKeyId: number | null;
+  sshKeyName: string | null;
+  /** Proxmox node: storage for backups before updates; null = no backups. */
+  backupStorage: string | null;
+  /** A key is chosen (whether the host answers shows "Test connection"). */
+  configured: boolean;
+  /** Containers, virtual machines and the node itself watched through this host. */
+  targetCount: number;
+  createdAt: string;
+}
+
+/** Body of `POST /api/hosts` / `PUT /api/hosts/:id` (omitted = keep on update). */
+export interface HostInput {
+  type?: HostType;
+  name?: string;
+  address?: string;
+  port?: number | null;
+  user?: string | null;
+  sshKeyId?: number | null;
+  backupStorage?: string | null;
+}
+
+/** A Proxmox node as listed in the settings. */
+export interface ProxmoxNode {
+  id: number;
+  name: string;
+  configured: boolean;
+  backupStorage: string | null;
 }

@@ -1,4 +1,4 @@
-import { AppSettings, Container, HomeAssistantInfo } from '../../core/models';
+import { AppSettings, Container, HomeAssistantInfo, TargetCapabilities } from '../../core/models';
 
 /** Test data shared by the specs of the containers page. */
 export const proxmoxSettings = (configured: boolean): AppSettings => ({
@@ -7,20 +7,13 @@ export const proxmoxSettings = (configured: boolean): AppSettings => ({
   polling: { releaseCron: '*/15 * * * *', releaseCronSource: 'env', advisoryCron: '0 */6 * * *', advisoryCronSource: 'env' },
   proxmox: {
     configured,
-    host: configured ? 'pve.lan' : null,
-    hostSource: configured ? 'ui' : null,
-    port: 22,
-    user: 'root',
-    sshKeyConfigured: configured,
-    sshKeySource: configured ? 'ui' : null,
+    nodes: configured ? [{ id: 1, name: 'pve', configured: true, backupStorage: null }] : [],
     checkCron: '0 */6 * * *',
     checkCronSource: 'env',
     checkConcurrency: 3,
     checkConcurrencySource: null,
     minCheckConcurrency: 1,
     maxCheckConcurrency: 10,
-    backupStorage: 'pbs',
-    backupStorageSource: 'ui',
     backupBeforeUpdate: true,
     backupBeforeUpdateSource: 'ui',
   },
@@ -50,9 +43,57 @@ export const proxmoxSettings = (configured: boolean): AppSettings => ({
   advisories: { github: true, osv: true, osvEcosystems: ['npm', 'Go'] },
 });
 
+/** Capabilities the server reports per kind (`TARGET_CAPABILITIES` in `src/proxmox/domain.ts`). */
+export const CAPABILITIES: Readonly<Record<Container['kind'], TargetCapabilities>> = {
+  lxc: {
+    backup: 'vzdump',
+    power: true,
+    aptOptional: true,
+    updateResources: true,
+    apps: true,
+    homeAssistant: false,
+    updateAll: true,
+    restart: 'guest',
+  },
+  vm: {
+    backup: 'vzdump',
+    power: true,
+    aptOptional: true,
+    updateResources: false,
+    apps: true,
+    homeAssistant: true,
+    updateAll: true,
+    restart: 'guest',
+  },
+  node: {
+    backup: null,
+    power: false,
+    aptOptional: false,
+    updateResources: false,
+    apps: false,
+    homeAssistant: false,
+    updateAll: false,
+    restart: 'machine',
+  },
+  server: {
+    backup: null,
+    power: false,
+    aptOptional: true,
+    updateResources: false,
+    apps: true,
+    homeAssistant: false,
+    updateAll: true,
+    restart: 'machine',
+  },
+};
+
 export const container = (overrides: Partial<Container> = {}): Container => ({
   id: 1,
+  hostId: 1,
+  hostName: 'pve',
+  configured: true,
   kind: 'lxc',
+  capabilities: CAPABILITIES[overrides.kind ?? 'lxc'],
   vmid: 101,
   name: 'vaultwarden',
   isEnabled: true,
@@ -60,6 +101,7 @@ export const container = (overrides: Partial<Container> = {}): Container => ({
   backupBeforeUpdate: null,
   startWhenStopped: false,
   effectiveBackupBeforeUpdate: true,
+  backupStorage: 'pbs',
   checkCron: null,
   updateCores: null,
   updateMemoryMb: null,

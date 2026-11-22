@@ -35,10 +35,73 @@ import {
   DISCOVER_COMMAND,
   guestExec,
   parseGuestExecResult,
+  capabilities,
+  guestOf,
+  isGuestKind,
+  targetTitle,
+  machineAptUpgradeScript,
+  machineExec,
   type Container,
   type ContainerApp,
 } from '../src/proxmox/domain.ts';
 import { SshShell } from '../src/proxmox/ssh.ts';
+
+describe('target capabilities', () => {
+  it('runs commands in guests through the node and directly on the host', () => {
+    assert.equal(isGuestKind('lxc'), true);
+    assert.equal(isGuestKind('vm'), true);
+    assert.equal(isGuestKind('node'), false);
+    assert.deepEqual(guestOf({ kind: 'vm', vmid: 137 }), { kind: 'vm', vmid: 137 });
+    assert.equal(guestOf({ kind: 'node', vmid: 0 }), null);
+    assert.equal(isGuestKind('server'), false);
+    assert.equal(guestOf({ kind: 'server', vmid: 0 }), null);
+    assert.equal(machineExec('apt list'), pctExec(101, 'apt list').replace('pct exec 101 -- ', ''));
+    assert.match(machineAptUpgradeScript('server'), / upgrade &&/);
+    assert.match(machineAptUpgradeScript('node'), / dist-upgrade &&/);
+  });
+
+  it('describes what each kind supports', () => {
+    assert.deepEqual(capabilities('lxc'), {
+      backup: 'vzdump',
+      power: true,
+      aptOptional: true,
+      updateResources: true,
+      apps: true,
+      homeAssistant: false,
+      updateAll: true,
+      restart: 'guest',
+    });
+    assert.equal(capabilities('vm').updateResources, false);
+    assert.equal(capabilities('vm').homeAssistant, true);
+    assert.deepEqual(capabilities('node'), {
+      backup: null,
+      power: false,
+      aptOptional: false,
+      updateResources: false,
+      apps: false,
+      homeAssistant: false,
+      updateAll: false,
+      restart: 'machine',
+    });
+    assert.deepEqual(capabilities('server'), {
+      backup: null,
+      power: false,
+      aptOptional: true,
+      updateResources: false,
+      apps: true,
+      homeAssistant: false,
+      updateAll: true,
+      restart: 'machine',
+    });
+    assert.equal(restartCheckScript('server'), VM_RESTART_CHECK_SCRIPT);
+  });
+
+  it('starts sentences with the target label', () => {
+    assert.equal(targetTitle({ kind: 'node', vmid: 0, name: 'pve' }), 'The Proxmox host');
+    assert.equal(targetTitle({ kind: 'lxc', vmid: 101, name: 'vw' }), 'CT 101');
+    assert.equal(targetTitle({ kind: 'server', vmid: 0, name: 'hetzner vps' }), 'hetzner vps');
+  });
+});
 
 describe('proxmox domain', () => {
   it('runs application updates with the non-interactive switches of community-scripts and apt', () => {
@@ -266,7 +329,7 @@ describe('proxmox domain', () => {
 
   it('lists the updates "update all" runs: apt first, then applications with an update command', () => {
     const container = {
-      id: 1, kind: 'container', vmid: 101, name: 'ct', isEnabled: true, aptEnabled: true, backupBeforeUpdate: null,
+      id: 1, kind: 'lxc', vmid: 101, name: 'ct', isEnabled: true, aptEnabled: true, backupBeforeUpdate: null,
       startWhenStopped: false, checkCron: null, updateCores: null, updateMemoryMb: null, resourcesToRestore: null,
       status: 'running', aptUpgradable: [{ name: 'curl', newVersion: '8.1', currentVersion: '8.0' }],
       lastCheckedAt: null, lastError: null, notifiedSignature: null,

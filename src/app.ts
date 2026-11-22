@@ -32,6 +32,11 @@ import { ContainerUpdater } from './proxmox/updater.ts';
 import { ContainerService } from './proxmox/service.ts';
 import type { NodeShell } from './proxmox/ssh.ts';
 import { ContainerStore } from './proxmox/store.ts';
+import { type KeyTool, SshKeygen } from './hosts/keys.ts';
+import { hostRoutes } from './hosts/routes.ts';
+import { seedNodeBackupStorage, seedProxmoxHost } from './hosts/seed.ts';
+import { type ShellFactory, ShellPool } from './hosts/shells.ts';
+import { HostStore } from './hosts/store.ts';
 import {
   MAX_CHECK_CONCURRENCY,
   maskSecret,
@@ -105,8 +110,14 @@ export interface AppDeps {
   embeddedUi?: ReadonlyMap<string, string>;
   /** Defaults to an `info` level logger. */
   log?: Logger;
-  /** Runs commands on the Proxmox node; defaults to an unconfigured shell (containers cannot be checked). */
+  /** Test double for every host's SSH shell (each host gets this one); defaults to `openShell`. */
   shell?: NodeShell;
+  /** Opens the SSH shell of a host; defaults to the system `ssh` client (`SshShell`). */
+  openShell?: ShellFactory;
+  /** known_hosts file pinning the host keys (trust on first use); defaults to `./known_hosts`. */
+  knownHostsFile?: string;
+  /** `ssh-keygen` operations (key inspection, generation, forgetting host keys); tests pass a fake. */
+  keyTool?: KeyTool;
   /** Pause before reconnecting to an update on the node after the SSH connection dropped (tests use 0). */
   reconnectDelayMs?: number;
   /** Pause between checks whether a container already sees CPU cores raised for an update (tests use 0). */
@@ -119,6 +130,9 @@ export interface AppDeps {
   homeAssistantFetch?: (input: string, init?: RequestInit) => Promise<Response>;
   /** Pause between polls of Home Assistant during updates (tests use 0). */
   homeAssistantPollMs?: number;
+  /** Wait after scheduling a machine reboot before polling it again, and the polling interval (tests use 0). */
+  machineRestartWaitMs?: number;
+  machinePollMs?: number;
   /** Login. Defaults: sessions required, origin/RP ID from the request, X-Forwarded-For not trusted. */
   auth?: {
     /** false turns the session check off – only for tests of other features. */
@@ -133,11 +147,6 @@ export interface AppDeps {
     bootstrap?: { username: string; password: string } | null;
   };
 }
-
-const unconfiguredShell: NodeShell = {
-  isConfigured: false,
-  run: () => Promise.reject(new Error('The Proxmox node is not configured.')),
-};
 
 export interface App {
   checker: ReleaseChecker;
@@ -355,13 +364,8 @@ const settingsSchema: ObjectSchema = {
     githubToken: { type: 'string', nullable: true },
     releaseCheckCron: { type: 'string', nullable: true, maxLength: 200 },
     advisoryCheckCron: { type: 'string', nullable: true, maxLength: 200 },
-    proxmoxHost: { type: 'string', nullable: true, maxLength: 253 },
-    proxmoxPort: { type: 'number', nullable: true },
-    proxmoxUser: { type: 'string', nullable: true, maxLength: 32 },
-    proxmoxSshKey: { type: 'string', nullable: true, maxLength: 20_000 },
     containerCheckCron: { type: 'string', nullable: true, maxLength: 200 },
     containerCheckConcurrency: { type: 'integer', nullable: true },
-    backupStorage: { type: 'string', nullable: true, maxLength: 100 },
     backupBeforeUpdate: { type: 'boolean', nullable: true },
     smtpHost: { type: 'string', nullable: true, maxLength: 253 },
     smtpPort: { type: 'integer', nullable: true },
@@ -460,7 +464,30 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     advisoryJob.reschedule();
   });
 
-  const shell = deps.shell ?? unconfiguredShell;
+  const hostStore = new HostStore(store.database, store.secretBox);
+  const keyTool = deps.keyTool ?? new SshKeygen();
+  const knownHostsFile = deps.knownHostsFile ?? 'known_hosts';
+  const testShell = deps.shell;
+  const shells = new ShellPool({
+    hosts: hostStore,
+    knownHostsFile,
+    ...(testShell ? { factory: () => testShell } : deps.openShell ? { factory: deps.openShell } : {}),
+  });
+  // Older versions kept one Proxmox node in the settings: move it into a host (once).
+  await seedProxmoxHost({
+    hosts: hostStore,
+    legacy: settings.legacyProxmox(),
+    clearLegacy: () => settings.clearLegacyProxmox(),
+    keyTool,
+    log,
+  });
+  // …and its global backup storage into the nodes without their own (once).
+  seedNodeBackupStorage({
+    hosts: hostStore,
+    legacy: settings.legacyBackupStorage(),
+    clearLegacy: () => settings.clearLegacyBackupStorage(),
+    log,
+  });
   const auth = new AuthService(new AuthStore(store.database), { dataDir: deps.auth?.dataDir ?? null, log });
   await auth.bootstrap(deps.auth?.bootstrap ?? null);
   auth.ensureSetupCode();
@@ -471,7 +498,8 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const containers = new ContainerService({
     containers: containerStore,
     repositories: store,
-    shell,
+    shells,
+    nodeHostId: () => hostStore.firstProxmoxHost()?.id ?? null,
     dispatcher,
     log,
     ...(deps.reconnectDelayMs === undefined ? {} : { reconnectDelayMs: deps.reconnectDelayMs }),
@@ -480,6 +508,8 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     ...(deps.fetchAppScript === undefined ? {} : { fetchAppScript: deps.fetchAppScript }),
     ...(deps.homeAssistantFetch === undefined ? {} : { homeAssistantFetch: deps.homeAssistantFetch }),
     ...(deps.homeAssistantPollMs === undefined ? {} : { homeAssistantPollMs: deps.homeAssistantPollMs }),
+    ...(deps.machineRestartWaitMs === undefined ? {} : { machineRestartWaitMs: deps.machineRestartWaitMs }),
+    ...(deps.machinePollMs === undefined ? {} : { machinePollMs: deps.machinePollMs }),
   });
   const scheduler = new ContainerScheduler({
     store: containerStore,
@@ -514,22 +544,21 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         advisoryCronSource: settings.sourceOf('advisoryCheckCron'),
       },
       proxmox: {
-        configured: shell.isConfigured,
-        host: current.proxmoxHost,
-        hostSource: settings.sourceOf('proxmoxHost'),
-        port: current.proxmoxPort,
-        user: current.proxmoxUser,
-        // The key itself is never returned.
-        sshKeyConfigured: !!current.proxmoxSshKey,
-        sshKeySource: settings.sourceOf('proxmoxSshKey'),
+        // A Proxmox node is added (Settings → Connections) and has an SSH key.
+        configured: hostStore.listProxmoxHosts().some((h) => shells.forHost(h.id).isConfigured),
+        /** Proxmox nodes guests can be added from (the first one is the default). */
+        nodes: hostStore.listProxmoxHosts().map((h) => ({
+          id: h.id,
+          name: h.name,
+          configured: shells.forHost(h.id).isConfigured,
+          backupStorage: h.backupStorage,
+        })),
         checkCron: current.containerCheckCron,
         checkCronSource: settings.sourceOf('containerCheckCron'),
         checkConcurrency: current.containerCheckConcurrency,
         checkConcurrencySource: settings.sourceOf('containerCheckConcurrency'),
         minCheckConcurrency: MIN_CHECK_CONCURRENCY,
         maxCheckConcurrency: MAX_CHECK_CONCURRENCY,
-        backupStorage: current.backupStorage,
-        backupStorageSource: settings.sourceOf('backupStorage'),
         backupBeforeUpdate: current.backupBeforeUpdate,
         backupBeforeUpdateSource: settings.sourceOf('backupBeforeUpdate'),
       },
@@ -888,7 +917,53 @@ export async function buildApp(deps: AppDeps): Promise<App> {
           service: containers,
           scheduler,
           updater,
-          backupDefaults: () => ({ storage: settings.current.backupStorage, enabled: settings.current.backupBeforeUpdate }),
+          backupDefaults: (hostId) => ({
+            storage: hostId === null ? null : (hostStore.getHost(hostId)?.backupStorage ?? null),
+            enabled: settings.current.backupBeforeUpdate,
+          }),
+          isProxmoxHost: (hostId) => hostStore.getHost(hostId)?.type === 'proxmox',
+          hostName: (hostId) => hostStore.getHost(hostId)?.name ?? null,
+          // A server's host exists only for its one target: removing the server removes the connection too.
+          onTargetDeleted: (container) => {
+            if (container.kind === 'server' && container.hostId !== null) {
+              hostStore.deleteHost(container.hostId);
+              shells.remove(container.hostId);
+            }
+          },
+        }),
+        ...hostRoutes({
+          hosts: hostStore,
+          shells,
+          keyTool,
+          knownHostsFile,
+          log,
+          // The first Proxmox node takes over containers saved while none was configured.
+          onHostAdded: (host) => {
+            if (host.type === 'proxmox' && hostStore.firstProxmoxHost()?.id === host.id) {
+              hostStore.adoptUnassignedTargets(host.id);
+            }
+            // A server is watched as soon as it is added (checked right away when it has a key).
+            if (host.type === 'server') {
+              const target = containerStore.addServer(host.id, host.name);
+              if (containers.shellFor(target).isConfigured) containers.startCheck(target, 'manual');
+            }
+          },
+          onHostUpdated: (host, previous) => {
+            const target = host.type === 'server' ? containerStore.getServer(host.id) : null;
+            if (target && target.name === previous.name && host.name !== previous.name) {
+              target.name = host.name;
+              containerStore.save(target);
+            }
+          },
+          beforeDeleteHost: (host) => {
+            const target = host.type === 'server' ? containerStore.getServer(host.id) : null;
+            if (!target) return null;
+            if (containers.isBusy(target.id) || updater.isQueued(target.id)) {
+              return `A task is running on ${host.name} – wait for it to finish.`;
+            }
+            containerStore.delete(target.id);
+            return null;
+          },
         }),
 
         '/api/repositories': {
@@ -915,7 +990,13 @@ export async function buildApp(deps: AppDeps): Promise<App> {
             }
             const result = await checker.check(repo, { forceAdvisories: true });
             // A new release changes the latest version of linked container apps: check those containers in the background.
-            const containerIds = result.newReleaseCount > 0 && shell.isConfigured ? containerStore.enabledIdsLinkedTo(repo.id) : [];
+            const containerIds =
+              result.newReleaseCount > 0
+                ? containerStore.enabledIdsLinkedTo(repo.id).filter((id) => {
+                    const container = containerStore.get(id);
+                    return container !== null && containers.shellFor(container).isConfigured;
+                  })
+                : [];
             if (containerIds.length > 0) {
               scheduler.checkMany(containerIds).catch((error: unknown) =>
                 log.error({ err: error, repo: fullName(repo) }, 'Checking linked containers failed'),
@@ -1023,6 +1104,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     await server?.stop();
     server = null;
     await containers.idle();
+    shells.dispose();
   };
 
   return { checker, releaseJob, advisoryJob, scheduler, updater, containers, auth, log, listen, close };

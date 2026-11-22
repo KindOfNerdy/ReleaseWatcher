@@ -1,7 +1,7 @@
 <header class="page-header">
   <div>
-    <h1>Containers</h1>
-    <p>LXC containers on your Proxmox node: pending apt packages and application updates.</p>
+    <h1>Machines</h1>
+    <p>Proxmox guests and servers: pending apt packages and application updates.</p>
   </div>
   <div class="header-actions">
     @if (picked() !== null) {
@@ -11,10 +11,10 @@
       <button type="button" class="btn btn-sm btn-ghost" (click)="togglePickAll()">
         {{ pickedUpdatable().length === updatable().length ? 'Select none' : 'Select all' }}
       </button>
-      <label class="backup-check" [class.disabled]="!backupStorage()" title="Backs up the containers set to back up before updates">
-        <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
+      <label class="backup-check" [class.disabled]="!headerStorage()" title="Backs up the containers set to back up before updates">
+        <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!headerStorage()" />
         Backup first
-        @if (backupStorage(); as storage) {
+        @if (headerStorage(); as storage) {
           <span class="muted mono">→ {{ storage }}</span>
         } @else {
           <span class="muted">(choose a storage in Settings)</span>
@@ -31,7 +31,7 @@
         <app-icon name="arrowUp" [size]="14" /> Update {{ pickedUpdatable().length }}
       </button>
     } @else {
-      <button type="button" class="btn btn-secondary" (click)="checkAll()" [disabled]="checkingAll() || !configured() || containers().length === 0">
+      <button type="button" class="btn btn-secondary" (click)="checkAll()" [disabled]="checkingAll() || !anyConfigured()">
         <app-icon name="refresh" [size]="16" [class.spin]="checkingAll()" />
         Check all
       </button>
@@ -39,11 +39,15 @@
         type="button"
         class="btn btn-secondary"
         (click)="startPicking()"
-        [disabled]="updatingAll() || !configured() || updatable().length === 0"
+        [disabled]="updatingAll() || !anyConfigured() || updatable().length === 0"
         [title]="updatable().length === 0 ? 'No container has pending updates' : 'Choose containers for apt upgrade and application updates (not the Proxmox host)'"
       >
         <app-icon [name]="updatingAll() ? 'refresh' : 'arrowUp'" [size]="16" [class.spin]="updatingAll()" />
         {{ updatingAll() ? 'Updating…' : 'Update' }}
+      </button>
+      <button type="button" class="btn btn-secondary" (click)="addingServer.set({ type: 'server', host: null })">
+        <app-icon name="plus" [size]="16" />
+        Add server
       </button>
       <button type="button" class="btn" (click)="openAdd()" [disabled]="!configured()">
         <app-icon name="plus" [size]="16" />
@@ -53,13 +57,13 @@
   </div>
 </header>
 
-@if (!loading() && !configured()) {
+@if (!loading() && !configured() && needsNode()) {
   <div class="callout">
     <app-icon name="alert" />
     <div>
-      <strong>The Proxmox node is not configured.</strong>
-      Containers cannot be checked or updated until a host and an SSH key are set.
-      <a routerLink="/settings">Configure the node in Settings</a>.
+      <strong>No Proxmox node is configured.</strong>
+      Containers cannot be checked or updated until the node is added with an SSH key.
+      <a routerLink="/settings" [queryParams]="{ tab: 'connections' }">Add it under Settings → Connections</a>.
     </div>
   </div>
 }
@@ -68,6 +72,14 @@
   <section class="card add-card" aria-labelledby="add-title">
     <div class="add-head">
       <h2 id="add-title">Add a container or virtual machine</h2>
+      @if (nodes().length > 1) {
+        <label for="add-node" class="visually-hidden">Proxmox node</label>
+        <select id="add-node" class="input node-select" [ngModel]="addHostId()" (ngModelChange)="pickNode($event)">
+          @for (n of nodes(); track n.id) {
+            <option [ngValue]="n.id" [disabled]="!n.configured">{{ n.name }}{{ n.configured ? '' : ' (no SSH key)' }}</option>
+          }
+        </select>
+      }
       <button type="button" class="icon-btn" (click)="addOpen.set(false)" aria-label="Close">
         <app-icon name="close" [size]="16" />
       </button>
@@ -129,7 +141,10 @@
   <div class="card empty">
     <span class="empty-icon"><app-icon name="box" [size]="22" /></span>
     <h2>No containers yet</h2>
-    <p>Configure the Proxmox node in Settings, then add the containers you want to keep up to date.</p>
+    <p>
+      Add the Proxmox node under Settings → Connections and then its containers, or add a server to watch its apt
+      packages and applications.
+    </p>
   </div>
 } @else {
   <div class="toolbar">
@@ -189,8 +204,18 @@
   } @else {
     <div class="browser" [class.show-detail]="showDetail()">
       <div class="ct-list-wrap">
-        <ul class="ct-list" aria-label="Containers" (keydown)="onListKeydown($event)">
+        <ul class="ct-list" aria-label="Machines" (keydown)="onListKeydown($event)">
           @for (c of visible(); track c.id; let i = $index) {
+            @if (groupHeadings().get(i); as g) {
+              <li class="ct-group" role="presentation">
+                <app-icon [name]="g.kind === 'proxmox' ? 'box' : 'server'" [size]="13" />
+                <span class="ct-group-name">{{ g.label }}</span>
+                @if (g.kind === 'proxmox') {
+                  <span>Proxmox node</span>
+                }
+                <span class="tab-count">{{ g.count }}</span>
+              </li>
+            }
             @let state = stateOf(c);
             <li class="enter" [style.--i]="i" [class.picking]="picked() !== null">
               @if (picked(); as picked) {
@@ -223,6 +248,8 @@
                       <span class="ct-id ct-host"><app-icon name="server" [size]="12" /> Host</span>
                     } @else if (c.kind === 'vm') {
                       <span class="ct-id mono" title="Virtual machine">VM {{ c.vmid }}</span>
+                    } @else if (c.kind === 'server') {
+                      <span class="ct-id ct-host"><app-icon name="server" [size]="12" /> Server</span>
                     } @else {
                       <span class="ct-id mono">{{ c.vmid }}</span>
                     }
@@ -281,6 +308,8 @@
               <div class="title-line">
                 @if (c.kind === 'node') {
                   <span class="badge badge-accent"><app-icon name="server" [size]="12" /> Host</span>
+                } @else if (c.kind === 'server') {
+                  <span class="badge badge-accent" [title]="c.hostName ?? ''"><app-icon name="server" [size]="12" /> Server</span>
                 } @else {
                   <span class="vmid mono">{{ c.vmid }}</span>
                 }
@@ -322,7 +351,7 @@
                     next {{ c.nextCheckAt | relativeTime: now() }}
                   </span>
                 }
-                @if (c.effectiveBackupBeforeUpdate && backupStorage()) {
+                @if (c.effectiveBackupBeforeUpdate && c.backupStorage) {
                   <span class="meta-item" title="A vzdump backup is made before updates (can be changed per update)">
                     backup before updates
                   </span>
@@ -337,10 +366,10 @@
                 <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
               } @else if (confirming() === 'update-' + c.id) {
                 <span class="confirm-text warn">Run {{ pendingCount(c) }} update(s) one after another?</span>
-                <label class="backup-check" [class.disabled]="!backupStorage()" title="One backup before the first update">
-                  <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
+                <label class="backup-check" [class.disabled]="!c.backupStorage" title="One backup before the first update">
+                  <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!c.backupStorage" />
                   Backup first
-                  @if (backupStorage(); as storage) {
+                  @if (c.backupStorage; as storage) {
                     <span class="muted mono">→ {{ storage }}</span>
                   } @else {
                     <span class="muted">(choose a storage in Settings)</span>
@@ -354,14 +383,14 @@
                     type="button"
                     class="btn btn-sm"
                     (click)="ask('update-' + c.id, c)"
-                    [disabled]="isBusy(c) || !configured()"
+                    [disabled]="isBusy(c) || !c.configured"
                     title="apt upgrade and all application updates of this container, one after another"
                   >
                     <app-icon name="arrowUp" [size]="14" />
                     Update all ({{ pendingCount(c) }})
                   </button>
                 }
-                <button type="button" class="btn btn-sm btn-secondary" (click)="check(c)" [disabled]="isBusy(c) || !configured()">
+                <button type="button" class="btn btn-sm btn-secondary" (click)="check(c)" [disabled]="isBusy(c) || !c.configured">
                   <app-icon name="refresh" [size]="14" />
                   Check
                 </button>
@@ -414,6 +443,8 @@
                   <span class="confirm-text warn">
                     @if (c.kind === 'node') {
                       Restart the Proxmox host? All its guests stop for a few minutes – ReleaseWatcher too, if it runs there.
+                    } @else if (c.kind === 'server') {
+                      Restart {{ c.name }}? It is unavailable for a few minutes – ReleaseWatcher too, if it runs there.
                     } @else {
                       Restart {{ label(c) }}? Its services are unavailable for a moment.
                     }
@@ -425,10 +456,10 @@
                     type="button"
                     class="btn btn-sm btn-secondary"
                     (click)="confirming.set('restart-' + c.id)"
-                    [disabled]="isBusy(c) || !configured()"
-                    [title]="c.kind === 'node' ? 'Reboot the Proxmox host' : (c.kind === 'vm' ? 'qm' : 'pct') + ' reboot – clean shutdown and start'"
+                    [disabled]="isBusy(c) || !c.configured"
+                    [title]="c.kind === 'node' ? 'Reboot the Proxmox host' : c.kind === 'server' ? 'Reboot the server (systemctl reboot)' : (c.kind === 'vm' ? 'qm' : 'pct') + ' reboot – clean shutdown and start'"
                   >
-                    <app-icon name="power" [size]="14" /> {{ c.kind === 'node' ? 'Restart host' : 'Restart' }}
+                    <app-icon name="power" [size]="14" /> {{ c.kind === 'node' ? 'Restart host' : c.kind === 'server' ? 'Restart server' : 'Restart' }}
                   </button>
                 }
               </div>
@@ -452,13 +483,13 @@
                   <div class="item-actions">
                     @if (confirming() === 'apt-' + c.id) {
                       <span class="confirm-text warn">Upgrade {{ c.aptUpgradable.length }} package(s)?</span>
-                      @if (c.kind === 'node') {
-                        <span class="muted small">apt-get dist-upgrade, no backup</span>
+                      @if (!c.capabilities.backup) {
+                        <span class="muted small">apt-get {{ c.kind === 'node' ? 'dist-upgrade' : 'upgrade' }}, no backup</span>
                       } @else {
-                      <label class="backup-check" [class.disabled]="!backupStorage()">
-                      <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
+                      <label class="backup-check" [class.disabled]="!c.backupStorage">
+                      <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!c.backupStorage" />
                       Backup first
-                      @if (backupStorage(); as storage) {
+                      @if (c.backupStorage; as storage) {
                         <span class="muted mono">→ {{ storage }}</span>
                       } @else {
                         <span class="muted">(choose a storage in Settings)</span>
@@ -468,7 +499,7 @@
                     <button type="button" class="btn btn-sm" (click)="upgradeApt(c)">Yes</button>
                       <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
                     } @else {
-                      <button type="button" class="btn btn-sm btn-secondary" (click)="ask('apt-' + c.id, c)" [disabled]="isBusy(c) || !configured() || blockedWhileStopped(c)" [title]="blockedWhileStopped(c) ? 'Start the container to upgrade it' : 'apt-get upgrade'">
+                      <button type="button" class="btn btn-sm btn-secondary" (click)="ask('apt-' + c.id, c)" [disabled]="isBusy(c) || !c.configured || blockedWhileStopped(c)" [title]="blockedWhileStopped(c) ? 'Start the container to upgrade it' : 'apt-get upgrade'">
                         <app-icon name="arrowUp" [size]="14" /> Upgrade
                       </button>
                     }
@@ -508,10 +539,10 @@
                   <div class="item-actions">
                     @if (confirming() === 'ha-' + c.id) {
                       <span class="confirm-text warn">Install {{ installableHa(c).length }} Home Assistant update(s)?</span>
-                      <label class="backup-check" [class.disabled]="!backupStorage()">
-                        <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
+                      <label class="backup-check" [class.disabled]="!c.backupStorage">
+                        <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!c.backupStorage" />
                         Backup first
-                        @if (backupStorage(); as storage) {
+                        @if (c.backupStorage; as storage) {
                           <span class="muted mono">→ {{ storage }}</span>
                         } @else {
                           <span class="muted">(choose a storage in Settings)</span>
@@ -520,7 +551,7 @@
                       <button type="button" class="btn btn-sm" (click)="updateHomeAssistant(c, null)">Yes</button>
                       <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
                     } @else {
-                      <button type="button" class="btn btn-sm" (click)="ask('ha-' + c.id, c)" [disabled]="isBusy(c) || !configured() || blockedWhileStopped(c)" title="Integrations and apps first, Home Assistant Core last">
+                      <button type="button" class="btn btn-sm" (click)="ask('ha-' + c.id, c)" [disabled]="isBusy(c) || !c.configured || blockedWhileStopped(c)" title="Integrations and apps first, Home Assistant Core last">
                         <app-icon name="arrowUp" [size]="14" /> Update all
                       </button>
                     }
@@ -547,10 +578,10 @@
                   <div class="item-actions">
                     @if (confirming() === 'ha-' + c.id + '-' + u.id) {
                       <span class="confirm-text warn">Update {{ u.name }}?</span>
-                      <label class="backup-check" [class.disabled]="!backupStorage()">
-                        <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
+                      <label class="backup-check" [class.disabled]="!c.backupStorage">
+                        <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!c.backupStorage" />
                         Backup first
-                        @if (backupStorage(); as storage) {
+                        @if (c.backupStorage; as storage) {
                           <span class="muted mono">→ {{ storage }}</span>
                         } @else {
                           <span class="muted">(choose a storage in Settings)</span>
@@ -563,7 +594,7 @@
                         type="button"
                         class="btn btn-sm"
                         (click)="ask('ha-' + c.id + '-' + u.id, c)"
-                        [disabled]="isBusy(c) || !configured() || blockedWhileStopped(c)"
+                        [disabled]="isBusy(c) || !c.configured || blockedWhileStopped(c)"
                         [title]="u.source === 'entity' ? 'update.install through the Home Assistant API' : 'ha CLI on the Home Assistant OS host'"
                       >
                         <app-icon name="arrowUp" [size]="14" /> Update
@@ -601,10 +632,10 @@
                 <div class="item-actions">
                   @if (confirming() === 'app-' + c.id + '-' + a.id) {
                     <span class="confirm-text warn">Run <code>{{ a.updateCommand }}</code>?</span>
-                    <label class="backup-check" [class.disabled]="!backupStorage()">
-                      <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
+                    <label class="backup-check" [class.disabled]="!c.backupStorage">
+                      <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!c.backupStorage" />
                       Backup first
-                      @if (backupStorage(); as storage) {
+                      @if (c.backupStorage; as storage) {
                         <span class="muted mono">→ {{ storage }}</span>
                       } @else {
                         <span class="muted">(choose a storage in Settings)</span>
@@ -619,7 +650,7 @@
                       class="btn btn-sm"
                       [class.btn-secondary]="!a.updateAvailable"
                       (click)="ask('app-' + c.id + '-' + a.id, c)"
-                      [disabled]="isBusy(c) || !configured() || blockedWhileStopped(c)"
+                      [disabled]="isBusy(c) || !c.configured || blockedWhileStopped(c)"
                       [title]="blockedWhileStopped(c) ? 'Start the container to update it' : 'Run: ' + a.updateCommand"
                     >
                       <app-icon name="arrowUp" [size]="14" /> Update
@@ -631,7 +662,7 @@
                 }
               </div>
             } @empty {
-              @if (c.kind !== 'node' && !c.homeAssistant?.detected) {
+              @if (c.capabilities.apps && !c.homeAssistant?.detected) {
               <div class="item muted small">
                 No applications configured.
                 <button type="button" class="link-btn" (click)="editing.set(c)">Add one</button>
@@ -650,9 +681,11 @@
   [container]="editing()"
   [globalCron]="globalCron()"
   [globalBackup]="settings()?.proxmox?.backupBeforeUpdate ?? false"
-  [backupStorage]="backupStorage()"
+  [backupStorage]="editing()?.backupStorage ?? null"
   (saved)="onSettingsSaved($event)"
   (closed)="onSettingsClosed()"
 />
 
 <app-run-log-dialog [target]="runTarget()" (finished)="onRunFinished($event)" (closed)="runTarget.set(null)" />
+
+<app-host-dialog [data]="addingServer()" (saved)="serverAdded($event)" (closed)="addingServer.set(null)" />

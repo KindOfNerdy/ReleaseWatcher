@@ -22,6 +22,8 @@ import {
   type PendingUpdate,
   type Run,
   targetLabel,
+  targetTitle,
+  capabilities,
 } from './domain.ts';
 import { installBlocker, normalizeHomeAssistantUrl } from './home-assistant.ts';
 import type { ContainerScheduler } from './scheduler.ts';
@@ -41,15 +43,29 @@ export interface ContainerRoutesDeps {
   service: ContainerService;
   scheduler: ContainerScheduler;
   updater: ContainerUpdater;
-  /** Global backup settings: storage for backups and whether to back up before updates by default. */
-  backupDefaults: () => { storage: string | null; enabled: boolean };
+  /**
+   * Backup settings for a target of the node `hostId`: its storage (the node's own, else the global one) and whether
+   * to back up before updates by default.
+   */
+  backupDefaults: (hostId: number | null) => { storage: string | null; enabled: boolean };
+  /** True when `hostId` is a Proxmox node (guests can be listed and added from it). */
+  isProxmoxHost: (hostId: number) => boolean;
+  /** Name of a host (shown next to its targets); null when unknown. */
+  hostName: (hostId: number) => string | null;
+  /** Called after a target was removed (a server's host goes with it). */
+  onTargetDeleted?: (container: Container) => void;
 }
 
 const COMMAND_MAX_LENGTH = 4000;
 
 const addContainerSchema: ObjectSchema = {
   type: 'object',
-  properties: { vmid: { type: 'integer', minimum: 1 }, name: { type: 'string', nullable: true, maxLength: 100 } },
+  properties: {
+    vmid: { type: 'integer', minimum: 1 },
+    name: { type: 'string', nullable: true, maxLength: 100 },
+    /** Proxmox node to add the guest from; omitted = the default (first) node. */
+    hostId: { type: 'integer', nullable: true, minimum: 1 },
+  },
   required: ['vmid'],
 };
 
@@ -139,6 +155,14 @@ const blankToNull = (value: string | null | undefined): string | null => value?.
 
 export const runDto = (run: Run | Omit<Run, 'output'>) => ({ ...run });
 
+/** A request named a host that is not a Proxmox node. */
+class UnknownNodeError extends Error {
+  override name = 'UnknownNodeError';
+  constructor() {
+    super('Proxmox node not found.');
+  }
+}
+
 /** Maps service errors to problem responses; everything else propagates to the global handler. */
 async function guard(action: () => Response | Promise<Response>): Promise<Response> {
   try {
@@ -146,6 +170,9 @@ async function guard(action: () => Response | Promise<Response>): Promise<Respon
   } catch (error) {
     if (error instanceof ShellNotConfiguredError) {
       return problem(409, error.message);
+    }
+    if (error instanceof UnknownNodeError) {
+      return problem(404, error.message);
     }
     if (
       error instanceof ContainerBusyError ||
@@ -185,7 +212,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
 
   /** Home Assistant OS of a virtual machine (null for containers); the token only as `hasToken` + a masked hint. */
   const homeAssistantDto = (c: Container) => {
-    if (c.kind !== 'vm') {
+    if (!capabilities(c.kind).homeAssistant) {
       return null;
     }
     const context = homeAssistantInstallContext(c);
@@ -209,14 +236,23 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     const appDtos = apps.map(appDto);
     return {
       id: c.id,
+      hostId: c.hostId,
+      hostName: c.hostId === null ? null : deps.hostName(c.hostId),
+      /** Its host has an SSH key, so checks and updates can run. */
+      configured: service.shellFor(c).isConfigured,
       kind: c.kind,
+      /** What can be done with this target (the UI shows only the matching settings and actions). */
+      capabilities: capabilities(c.kind),
       vmid: c.vmid,
       name: c.name,
       isEnabled: c.isEnabled,
       aptEnabled: c.aptEnabled,
       backupBeforeUpdate: c.backupBeforeUpdate,
       /** Whether updates back up first unless changed for a single update. */
-      effectiveBackupBeforeUpdate: c.kind !== 'node' && (c.backupBeforeUpdate ?? deps.backupDefaults().enabled),
+      effectiveBackupBeforeUpdate:
+        capabilities(c.kind).backup !== null && (c.backupBeforeUpdate ?? deps.backupDefaults(c.hostId).enabled),
+      /** Storage its backups go to (its node's, else the global one); null = it cannot be backed up or none is chosen. */
+      backupStorage: capabilities(c.kind).backup === null ? null : deps.backupDefaults(c.hostId).storage,
       startWhenStopped: c.startWhenStopped,
       checkCron: c.checkCron,
       updateCores: c.updateCores,
@@ -291,12 +327,41 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
 
   /** Storage to back up to before an update (null = no backup), or a problem response. */
   const resolveBackup = (container: Container, requested: boolean | null | undefined): string | null | Response => {
-    const defaults = deps.backupDefaults();
+    if (capabilities(container.kind).backup === null) {
+      return requested === true
+        ? problem(409, `${targetTitle(container)} cannot be backed up with vzdump – update it without a backup.`)
+        : null;
+    }
+    const defaults = deps.backupDefaults(container.hostId);
     const enabled = requested ?? container.backupBeforeUpdate ?? defaults.enabled;
     if (!enabled) {
       return null;
     }
-    return defaults.storage ?? problem(409, 'Choose a backup storage in Settings → Proxmox node, or update without a backup.');
+    return (
+      defaults.storage ??
+      problem(409, 'Choose a backup storage (Settings → Containers, or the node under Connections), or update without a backup.')
+    );
+  };
+
+  /**
+   * The Proxmox node a request names (`hostId`, from the query or the body) or the default one. Throws
+   * {@link UnknownNodeError} (→ 404) for an unknown node and ShellNotConfiguredError (→ 409) when it has no key.
+   */
+  const requireNode = (requested: number | null | undefined = null): number => {
+    if (requested != null && !deps.isProxmoxHost(requested)) {
+      throw new UnknownNodeError();
+    }
+    const hostId = requested ?? service.nodeHostId();
+    if (hostId === null || !service.shellForHost(hostId).isConfigured) {
+      throw new ShellNotConfiguredError();
+    }
+    return hostId;
+  };
+
+  /** `?hostId=` of a request (null = not given). */
+  const queryHostId = (req: Request): number | null => {
+    const raw = new URL(req.url).searchParams.get('hostId');
+    return raw === null || raw === '' ? null : parseId(raw, 'query/hostId');
   };
 
   const accepted = (run: Run) => Response.json(runDto(run), { status: 202, headers: { location: `/api/runs/${run.id}` } });
@@ -329,10 +394,11 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
 
   return {
     '/api/proxmox/test': {
-      POST: () =>
+      POST: (req: Request) =>
         guard(async () => {
+          const hostId = requireNode(queryHostId(req));
           try {
-            return Response.json({ output: await service.testConnection() });
+            return Response.json({ output: await service.testConnection(hostId) });
           } catch (error) {
             if (error instanceof ShellNotConfiguredError) throw error;
             return problem(502, 'Could not connect to the Proxmox node.', { detail: errorMessage(error) });
@@ -341,11 +407,12 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     },
     // Containers present on the node (`pct list`), marked when already added.
     '/api/proxmox/containers': {
-      GET: () =>
+      GET: (req: Request) =>
         guard(async () => {
+          const hostId = requireNode(queryHostId(req));
           try {
-            const found = await service.discover();
-            return Response.json(found.map((c) => ({ ...c, added: containers.existsVmid(c.vmid) })));
+            const found = await service.discover(hostId);
+            return Response.json(found.map((c) => ({ ...c, added: containers.existsVmid(hostId, c.vmid) })));
           } catch (error) {
             if (error instanceof ShellNotConfiguredError) throw error;
             return problem(502, 'Listing containers failed.', { detail: errorMessage(error) });
@@ -355,10 +422,11 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
 
     // Storages on the node that accept backups (`pvesm status --content backup`).
     '/api/proxmox/storages': {
-      GET: () =>
+      GET: (req: Request) =>
         guard(async () => {
+          const hostId = requireNode(queryHostId(req));
           try {
-            return Response.json(await service.backupStorages());
+            return Response.json(await service.backupStorages(hostId));
           } catch (error) {
             if (error instanceof ShellNotConfiguredError) throw error;
             return problem(502, 'Listing storages failed.', { detail: errorMessage(error) });
@@ -370,23 +438,21 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       GET: () => Response.json(listDtos()),
       POST: (req: Request) =>
         guard(async () => {
-          const body = await readBody<{ vmid: number; name?: string | null }>(req, addContainerSchema);
-          if (containers.existsVmid(body.vmid)) {
+          const body = await readBody<{ vmid: number; name?: string | null; hostId?: number | null }>(req, addContainerSchema);
+          const hostId = requireNode(body.hostId);
+          if (containers.existsVmid(hostId, body.vmid)) {
             return problem(409, `Guest ${body.vmid} has already been added.`);
-          }
-          if (!service.shell.isConfigured) {
-            throw new ShellNotConfiguredError();
           }
           let found: DiscoveredContainer | undefined;
           try {
-            found = (await service.discover()).find((c) => c.vmid === body.vmid);
+            found = (await service.discover(hostId)).find((c) => c.vmid === body.vmid);
           } catch (error) {
             return problem(502, 'Listing containers failed.', { detail: errorMessage(error) });
           }
           if (!found) {
             return validationProblem('vmid', `No container or virtual machine ${body.vmid} exists on the node.`);
           }
-          const container = containers.add(body.vmid, blankToNull(body.name) ?? found.name, found.kind);
+          const container = containers.add(hostId, body.vmid, blankToNull(body.name) ?? found.name, found.kind);
           service.startCheck(container, 'manual');
           return Response.json(containerDto(container), {
             status: 201,
@@ -396,21 +462,19 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     },
     // The Proxmox host itself as a target: apt check and dist-upgrade on the node (no applications, no backup).
     '/api/containers/node': {
-      POST: () =>
+      POST: (req: Request) =>
         guard(async () => {
-          if (containers.getNode()) {
+          const hostId = requireNode(queryHostId(req));
+          if (containers.getNode(hostId)) {
             return problem(409, 'The Proxmox host has already been added.');
-          }
-          if (!service.shell.isConfigured) {
-            throw new ShellNotConfiguredError();
           }
           let name: string;
           try {
-            name = await service.nodeHostname();
+            name = await service.nodeHostname(hostId);
           } catch (error) {
             return problem(502, 'Could not connect to the Proxmox node.', { detail: errorMessage(error) });
           }
-          const node = containers.addNode(name);
+          const node = containers.addNode(hostId, name);
           service.startCheck(node, 'manual');
           return Response.json(containerDto(node), {
             status: 201,
@@ -421,20 +485,18 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     // Adds every container of the node that has not been added yet and queues a check of each. Virtual machines
     // are added one by one: they need the QEMU guest agent, and appliances like Home Assistant OS have no apt.
     '/api/containers/add-all': {
-      POST: () =>
+      POST: (req: Request) =>
         guard(async () => {
-          if (!service.shell.isConfigured) {
-            throw new ShellNotConfiguredError();
-          }
+          const hostId = requireNode(queryHostId(req));
           let found: DiscoveredContainer[];
           try {
-            found = await service.discover();
+            found = await service.discover(hostId);
           } catch (error) {
             return problem(502, 'Listing containers failed.', { detail: errorMessage(error) });
           }
           const added = found
-            .filter((c) => c.kind === 'lxc' && !containers.existsVmid(c.vmid))
-            .map((c) => containers.add(c.vmid, c.name, c.kind));
+            .filter((c) => c.kind === 'lxc' && !containers.existsVmid(hostId, c.vmid))
+            .map((c) => containers.add(hostId, c.vmid, c.name, c.kind));
           // Checks run through the scheduler queue, so the concurrency limit applies.
           void scheduler.checkMany(added.map((c) => c.id));
           return Response.json(
@@ -446,11 +508,12 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     '/api/containers/check-all': {
       POST: () =>
         guard(() => {
-          if (!service.shell.isConfigured) {
+          const queued = containers.listEnabled().filter((c) => service.shellFor(c).isConfigured).length;
+          if (queued === 0 && containers.listEnabled().length > 0) {
             throw new ShellNotConfiguredError();
           }
           void scheduler.checkAll();
-          return Response.json({ queued: containers.listEnabled().length }, { status: 202 });
+          return Response.json({ queued }, { status: 202 });
         }),
     },
     // Updates every container with pending updates (or those in `ids`: apt, then applications), one after another.
@@ -459,13 +522,15 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       POST: (req: Request) =>
         guard(async () => {
           const options = await readUpdateOptions<{ backup: boolean | null; ids: number[] | null }>(req, updateAllSchema);
-          if (!service.shell.isConfigured) {
-            throw new ShellNotConfiguredError();
-          }
           const ids = options.ids ? new Set(options.ids) : null;
           const plan = updater
             .plan()
-            .filter(({ container }) => (ids === null || ids.has(container.id)) && !updater.isQueued(container.id));
+            .filter(
+              ({ container }) =>
+                (ids === null || ids.has(container.id)) &&
+                !updater.isQueued(container.id) &&
+                service.shellFor(container).isConfigured,
+            );
           if (plan.length === 0 && updater.isRunning) {
             throw new UpdateAllRunningError();
           }
@@ -527,26 +592,24 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         }
         const homeAssistantToken =
           body.homeAssistantToken === undefined ? container.homeAssistantToken : blankToNull(body.homeAssistantToken);
-        const isVm = container.kind === 'vm';
-        if (isVm && homeAssistantToken !== null && homeAssistantUrl === null) {
+        const can = capabilities(container.kind);
+        if (can.homeAssistant && homeAssistantToken !== null && homeAssistantUrl === null) {
           return validationProblem('homeAssistantUrl', 'Enter the Home Assistant URL the token is used with.');
         }
-        const isNode = container.kind === 'node';
+        // Settings a kind does not support are cleared (see TargetCapabilities).
         Object.assign(container, {
           name,
           isEnabled: body.isEnabled,
-          // The host entry exists only for apt; backups and temporary starts apply to containers only.
-          aptEnabled: isNode || body.aptEnabled,
-          backupBeforeUpdate: isNode ? null : body.backupBeforeUpdate === undefined ? container.backupBeforeUpdate : body.backupBeforeUpdate,
-          startWhenStopped: !isNode && (body.startWhenStopped ?? container.startWhenStopped),
+          aptEnabled: !can.aptOptional || body.aptEnabled,
+          backupBeforeUpdate:
+            can.backup === null ? null : body.backupBeforeUpdate === undefined ? container.backupBeforeUpdate : body.backupBeforeUpdate,
+          startWhenStopped: can.power && (body.startWhenStopped ?? container.startWhenStopped),
           checkCron,
-          // Only containers are resized for updates.
-          updateCores: container.kind === 'lxc' ? updateCores : null,
-          updateMemoryMb: container.kind === 'lxc' ? updateMemoryMb : null,
-          // Home Assistant OS runs in virtual machines only.
-          homeAssistantUrl: isVm ? homeAssistantUrl : null,
-          homeAssistantToken: isVm ? homeAssistantToken : null,
-          homeAssistantInstall: isVm && (body.homeAssistantInstall ?? container.homeAssistantInstall),
+          updateCores: can.updateResources ? updateCores : null,
+          updateMemoryMb: can.updateResources ? updateMemoryMb : null,
+          homeAssistantUrl: can.homeAssistant ? homeAssistantUrl : null,
+          homeAssistantToken: can.homeAssistant ? homeAssistantToken : null,
+          homeAssistantInstall: can.homeAssistant && (body.homeAssistantInstall ?? container.homeAssistantInstall),
         });
         if (!container.aptEnabled) {
           container.aptUpgradable = [];
@@ -563,6 +626,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           return problem(409, 'A task is running in this container – wait for it to finish.');
         }
         containers.delete(container.id);
+        deps.onTargetDeleted?.(container);
         return new Response(null, { status: 204 });
       },
     },
@@ -584,12 +648,6 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           if (!container.aptEnabled) {
             return problem(409, 'apt is disabled for this container.');
           }
-          if (container.kind === 'node') {
-            if (options.backup === true) {
-              return problem(409, 'The Proxmox host cannot be backed up with vzdump – update it without a backup.');
-            }
-            return accepted(service.startAptUpgrade(container, null));
-          }
           const backup = resolveBackup(container, options.backup);
           return backup instanceof Response ? backup : accepted(service.startAptUpgrade(container, backup));
         }),
@@ -606,7 +664,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           if (!container) {
             return problem(404, 'Container not found.');
           }
-          if (!service.shell.isConfigured) {
+          if (!service.shellFor(container).isConfigured) {
             throw new ShellNotConfiguredError();
           }
           if (updater.isQueued(container.id)) {
@@ -618,7 +676,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
             : accepted(service.startHomeAssistantUpdate(container, options.ids ?? null, backup));
         }),
     },
-    // Restarts a running container (`pct reboot`) or schedules a restart of the Proxmox host.
+    // Restarts a running container (`pct reboot`) or schedules a restart of a machine (the Proxmox host, a server).
     '/api/containers/:id/restart': {
       POST: (req: Bun.BunRequest<'/api/containers/:id/restart'>) =>
         guard(() => {
@@ -626,15 +684,17 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           if (!container) {
             return problem(404, 'Container not found.');
           }
-          if (!service.shell.isConfigured) {
+          if (!service.shellFor(container).isConfigured) {
             throw new ShellNotConfiguredError();
           }
           if (updater.isQueued(container.id)) {
             return problem(409, `Updates of ${targetLabel(container)} are running – restart it when they have finished.`);
           }
-          if (container.kind === 'node') {
-            if (service.hasActiveTasks() || containers.list().some((c) => updater.isQueued(c.id))) {
-              return problem(409, 'Checks or updates are running – restart the Proxmox host when they have finished.');
+          if (capabilities(container.kind).restart === 'machine') {
+            // Everything reached through this machine stops with it (a node's guests too).
+            const onHost = containers.list().filter((c) => c.hostId === container.hostId);
+            if (service.hasActiveTasksOn(container.hostId) || onHost.some((c) => updater.isQueued(c.id))) {
+              return problem(409, `Checks or updates are running – restart ${targetLabel(container)} when they have finished.`);
             }
           } else if (container.status === 'stopped') {
             return problem(409, `${targetLabel(container)} is stopped – it does not need a restart.`);
@@ -651,7 +711,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           if (!container) {
             return problem(404, 'Container not found.');
           }
-          if (!service.shell.isConfigured) {
+          if (!service.shellFor(container).isConfigured) {
             throw new ShellNotConfiguredError();
           }
           if (updater.isQueued(container.id)) {
@@ -676,7 +736,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           if (!container) {
             return problem(404, 'Container not found.');
           }
-          if (!service.shell.isConfigured) {
+          if (!service.shellFor(container).isConfigured) {
             throw new ShellNotConfiguredError();
           }
           let detected;
@@ -715,8 +775,8 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         if (!container) {
           return problem(404, 'Container not found.');
         }
-        if (container.kind === 'node') {
-          return problem(409, 'Applications can be added to guests only, not to the Proxmox host.');
+        if (!capabilities(container.kind).apps) {
+          return problem(409, `Applications cannot be added to ${targetLabel(container)}.`);
         }
         const input = toAppInput(body, null);
         if (input instanceof Response) {

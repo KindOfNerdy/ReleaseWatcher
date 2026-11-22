@@ -15,10 +15,11 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ApiService, describeError } from '../../core/api.service';
-import { AppSettings, Container, ContainerApp, DiscoveredContainer, HomeAssistantUpdate, Run } from '../../core/models';
+import { AppSettings, Container, ContainerApp, DiscoveredContainer, HomeAssistantUpdate, Host, Run } from '../../core/models';
 import { StatusService } from '../../core/status.service';
 import { ContainerSort, PreferencesService } from '../../core/preferences.service';
 import { ToastService } from '../../core/toast.service';
+import { HostDialog, HostDialogData } from '../../shared/host.dialog';
 import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
 import { AptPackages } from './apt-packages';
@@ -31,7 +32,7 @@ const BUSY_REFRESH_MS = 3000;
 /** Width at which the list and the detail pane stop sitting side by side (same as in the stylesheet). */
 const NARROW_QUERY = '(max-width: 1100px)';
 
-/** Proxmox LXC containers: pending apt/app updates and manual update actions. */
+/** Proxmox guests and servers: pending apt/app updates and manual update actions. */
 @Component({
   selector: 'app-containers-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -44,6 +45,7 @@ const NARROW_QUERY = '(max-width: 1100px)';
     ContainerSettingsDialog,
     RunLogDialog,
     AptPackages,
+    HostDialog,
   ],
   templateUrl: './containers.page.html',
   styleUrl: './containers.page.scss',
@@ -84,11 +86,33 @@ export class ContainersPage {
   /** "Add all" adds containers only: virtual machines need the guest agent and may have no apt. */
   protected readonly availableContainers = computed(() => this.available().filter((c) => c.kind === 'lxc'));
   protected readonly globalCron = computed(() => this.settings()?.proxmox.checkCron ?? '');
-  protected readonly backupStorage = computed(() => this.settings()?.proxmox.backupStorage ?? null);
+  /** Proxmox nodes guests can be added from (the first one is the default). */
+  protected readonly nodes = computed(() => this.settings()?.proxmox.nodes ?? []);
+  /** Node the add form lists guests of (null = the default node). */
+  protected readonly addHostId = signal<number | null>(null);
+  /**
+   * Backup storage shown with "Update all": the storage of the selected targets' node(s); several nodes with
+   * different storages are summarised.
+   */
+  protected readonly headerStorage = computed(() => {
+    const storages = new Set(this.updatable().map((c) => c.backupStorage).filter((s): s is string => s !== null));
+    return storages.size === 0 ? null : storages.size === 1 ? [...storages][0]! : 'each node’s storage';
+  });
   /** "Backup first" checkbox of the open update confirmation. */
   protected readonly backupFirst = signal(false);
   protected readonly anyBusy = computed(() => this.containers().some((c) => c.isBusy));
-  protected readonly hasNode = computed(() => this.containers().some((c) => c.kind === 'node'));
+  /** The node picked in the add form has its own entry already ("Add host" is hidden). */
+  protected readonly hasNode = computed(() =>
+    this.containers().some((c) => c.kind === 'node' && (this.addHostId() === null || c.hostId === this.addHostId())),
+  );
+  /** At least one target can be reached (its host has a key) – "Check all" and "Update" need one. */
+  protected readonly anyConfigured = computed(() => this.containers().some((c) => c.configured));
+  /** The missing-node hint matters when there is nothing yet or Proxmox targets are listed (not for servers only). */
+  protected readonly needsNode = computed(
+    () => this.containers().length === 0 || this.containers().some((c) => c.kind !== 'server'),
+  );
+  /** "Add server" dialog (a new server host gets its target right away). */
+  protected readonly addingServer = signal<HostDialogData | null>(null);
   protected readonly label = targetLabel;
   /** Containers "Update all" would update (same rules as the server: no host, no disabled or blocked ones). */
   protected readonly updatable = computed(() =>
@@ -124,13 +148,33 @@ export class ContainersPage {
     return counts;
   });
 
+  /** Targets of more than one host (several nodes, or a node and servers) are listed in groups. */
+  protected readonly grouped = computed(() => new Set(this.containers().map((c) => groupOf(c).key)).size > 1);
+
   protected readonly visible = computed(() => {
     const filter = this.filter();
     const query = this.query().trim().toLowerCase();
     const sort = this.preferences.containerSort();
+    const grouped = this.grouped();
     return this.containers()
       .filter((c) => matchesFilter(c, filter) && (!query || searchText(c).includes(query)))
-      .sort((a, b) => compareContainers(a, b, sort));
+      .sort((a, b) => (grouped ? groupOf(a).order.localeCompare(groupOf(b).order) : 0) || compareContainers(a, b, sort));
+  });
+
+  /** Group headings of the list by the index of the group's first visible target (only when grouped). */
+  protected readonly groupHeadings = computed(() => {
+    const headings = new Map<number, { label: string; kind: 'proxmox' | 'servers' | 'none'; count: number }>();
+    if (!this.grouped()) return headings;
+    let current: { key: string; heading: { label: string; kind: 'proxmox' | 'servers' | 'none'; count: number } } | null = null;
+    this.visible().forEach((c, i) => {
+      const group = groupOf(c);
+      if (group.key !== current?.key) {
+        current = { key: group.key, heading: { label: group.label, kind: group.kind, count: 0 } };
+        headings.set(i, current.heading);
+      }
+      current.heading.count++;
+    });
+    return headings;
   });
 
   /** The selected container, or the first one in the list when nothing (still visible) is selected. */
@@ -157,6 +201,15 @@ export class ContainersPage {
       clearInterval(ticker);
       this.clearRefresh();
     });
+  }
+
+  protected async serverAdded(host: Host): Promise<void> {
+    this.addingServer.set(null);
+    this.toast.success(
+      host.configured ? `Added ${host.name} – checking it now.` : `Added ${host.name} – choose an SSH key for it in Settings → Connections.`,
+    );
+    await this.load();
+    void this.statusService.refresh();
   }
 
   protected async load(): Promise<void> {
@@ -190,10 +243,23 @@ export class ContainersPage {
 
   protected async openAdd(): Promise<void> {
     this.addOpen.set(true);
+    if (this.addHostId() === null || !this.nodes().some((n) => n.id === this.addHostId())) {
+      this.addHostId.set(this.nodes()[0]?.id ?? null);
+    }
+    await this.discover();
+  }
+
+  /** Another node picked in the add form: lists its guests. */
+  protected async pickNode(hostId: number): Promise<void> {
+    this.addHostId.set(Number(hostId));
+    await this.discover();
+  }
+
+  private async discover(): Promise<void> {
     this.discovering.set(true);
     this.discoverError.set(null);
     try {
-      const found = await firstValueFrom(this.api.discoverContainers());
+      const found = await firstValueFrom(this.api.discoverContainers(this.nodeParam()));
       this.discovered.set(found);
       this.selectedVmid = found.find((c) => !c.added)?.vmid ?? null;
     } catch (error) {
@@ -202,6 +268,11 @@ export class ContainersPage {
     } finally {
       this.discovering.set(false);
     }
+  }
+
+  /** `hostId` for requests about the picked node – null (the default node) while there is only one. */
+  private nodeParam(): number | null {
+    return this.nodes().length > 1 ? this.addHostId() : null;
   }
 
   /** Kind of the guest picked in the add form. */
@@ -217,7 +288,7 @@ export class ContainersPage {
     }
     this.adding.set(true);
     try {
-      const created = await firstValueFrom(this.api.addContainer(vmid));
+      const created = await firstValueFrom(this.api.addContainer(vmid, null, this.nodeParam()));
       this.containers.update((list) => [...list, created].sort((a, b) => a.vmid - b.vmid));
       this.selectedId.set(created.id);
       this.scheduleRefresh(); // the first check of the new container runs in the background
@@ -241,7 +312,7 @@ export class ContainersPage {
     }
     this.adding.set(true);
     try {
-      const created = await firstValueFrom(this.api.addAllContainers());
+      const created = await firstValueFrom(this.api.addAllContainers(this.nodeParam()));
       const vmids = new Set(created.map((c) => c.vmid));
       this.discovered.update((list) => list.map((c) => (vmids.has(c.vmid) ? { ...c, added: true } : c)));
       this.addOpen.set(false);
@@ -267,7 +338,7 @@ export class ContainersPage {
     }
     this.adding.set(true);
     try {
-      const created = await firstValueFrom(this.api.addNode());
+      const created = await firstValueFrom(this.api.addNode(this.nodeParam()));
       this.containers.update((list) => [created, ...list]);
       this.selectedId.set(created.id);
       this.scheduleRefresh();
@@ -304,7 +375,7 @@ export class ContainersPage {
   protected startPicking(): void {
     this.confirming.set(null);
     this.backupFirst.set(
-      this.backupStorage() !== null && this.updatable().some((c) => c.effectiveBackupBeforeUpdate),
+      this.updatable().some((c) => c.effectiveBackupBeforeUpdate && c.backupStorage !== null),
     );
     this.picked.set(new Set(this.updatable().map((c) => c.id)));
   }
@@ -337,7 +408,7 @@ export class ContainersPage {
     this.updatingAll.set(true);
     try {
       const { containers, updates } = await firstValueFrom(
-        this.api.updateAllContainers(this.backupFirst() && this.backupStorage() !== null, ids),
+        this.api.updateAllContainers(this.backupFirst() && this.headerStorage() !== null, ids),
       );
       this.toast.info(
         containers > 0
@@ -361,9 +432,8 @@ export class ContainersPage {
 
   /** Opens an update confirmation; "Backup first" starts with the container's default. */
   protected ask(key: string, container: Container): void {
-    // The host cannot be backed up with vzdump.
     this.backupFirst.set(
-      container.kind !== 'node' && container.effectiveBackupBeforeUpdate && this.backupStorage() !== null,
+      container.capabilities.backup !== null && container.effectiveBackupBeforeUpdate && container.backupStorage !== null,
     );
     this.confirming.set(key);
   }
@@ -515,7 +585,7 @@ export class ContainersPage {
    * with a newer version and an update command; nothing for the host, paused or blocked containers).
    */
   protected pendingCount(container: Container): number {
-    if (container.kind === 'node' || !container.isEnabled || this.blockedWhileStopped(container)) {
+    if (!container.capabilities.updateAll || !container.isEnabled || this.blockedWhileStopped(container)) {
       return 0;
     }
     const apt = container.aptEnabled && container.aptUpgradable.length > 0 ? 1 : 0;
@@ -527,7 +597,7 @@ export class ContainersPage {
   /** Runs every pending update of one container, one after another (a single backup before the first one). */
   protected async updateContainer(container: Container): Promise<void> {
     this.confirming.set(null);
-    const backup = this.backupFirst() && this.backupStorage() !== null;
+    const backup = this.backupFirst() && container.backupStorage !== null;
     await this.withBusy(container.id, async () => {
       const { updates } = await firstValueFrom(this.api.runContainerUpdates(container.id, backup));
       this.toast.info(
@@ -696,6 +766,14 @@ const SORTS: readonly { value: ContainerSort; label: string }[] = [
   { value: 'name', label: 'Name' },
 ];
 
+/** List group of a target: its Proxmox node, all servers together, or targets without a host. */
+function groupOf(c: Container): { key: string; label: string; kind: 'proxmox' | 'servers' | 'none'; order: string } {
+  if (c.kind === 'server') return { key: 'servers', label: 'Servers', kind: 'servers', order: '2' };
+  if (c.hostId === null) return { key: 'none', label: 'Without a host', kind: 'none', order: '3' };
+  const name = c.hostName ?? 'Proxmox node';
+  return { key: `node-${c.hostId}`, label: name, kind: 'proxmox', order: `1 ${name.toLowerCase()} ${c.hostId}` };
+}
+
 function hasError(c: Container): boolean {
   return !!c.lastError || c.apps.some((a) => !!a.error);
 }
@@ -731,9 +809,11 @@ function attentionRank(c: Container): number {
 }
 
 function compareContainers(a: Container, b: Container, sort: ContainerSort): number {
-  // The host stays on top, like the node in Proxmox's own tree.
+  // The host stays on top, like the node in Proxmox's own tree; servers follow the node's guests.
   const host = Number(b.kind === 'node') - Number(a.kind === 'node');
   if (host !== 0) return host;
+  const server = Number(a.kind === 'server') - Number(b.kind === 'server');
+  if (server !== 0) return server;
   if (sort === 'attention') {
     const rank = attentionRank(a) - attentionRank(b);
     if (rank !== 0) return rank;
@@ -748,7 +828,8 @@ function compareContainers(a: Container, b: Container, sort: ContainerSort): num
 function searchText(c: Container): string {
   return [
     c.name,
-    c.kind === 'node' ? 'host proxmox' : c.kind === 'vm' ? `vm ${c.vmid}` : String(c.vmid),
+    c.kind === 'node' ? 'host proxmox' : c.kind === 'vm' ? `vm ${c.vmid}` : c.kind === 'server' ? 'server' : String(c.vmid),
+    c.hostName ?? '',
     ...c.apps.flatMap((a) => [a.name, a.repositoryFullName ?? '']),
   ]
     .join(' ')

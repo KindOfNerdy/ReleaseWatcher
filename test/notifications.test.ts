@@ -15,12 +15,14 @@ import { advisory, RecordingNotifier, release, silentLog } from './helpers.ts';
 const releaseOf = (tag: string) => ({ owner: 'acme', repository: 'widget', release: release(tag, 1) });
 const containerUpdates: ContainerUpdatesNotification = {
   vmid: 105,
+  targetKind: 'lxc',
   containerName: 'cloud',
   apps: [{ name: 'Nextcloud', installedVersion: '29.0.1', latestVersion: '29.0.2' }],
   aptPackages: [{ name: 'curl', currentVersion: '8.0', newVersion: '8.1' }],
 };
 const failedUpdate: UpdateResultNotification = {
   vmid: 105,
+  targetKind: 'lxc',
   containerName: 'cloud',
   kind: 'apt-upgrade',
   appName: null,
@@ -149,7 +151,7 @@ describe('Discord digest and update results', () => {
     assert.equal(payload.content, '@here');
     const [embed] = payload.embeds;
     assert.equal(embed?.title, '1 new release, 1 container with updates, 1 update failed');
-    assert.equal(embed?.url, 'https://rw.example.com/containers');
+    assert.equal(embed?.url, 'https://rw.example.com/machines');
     assert.match(embed!.description, /\*\*New releases\*\*\n• \*\*acme\/widget\*\* \[v1\.2\.3\]\(/);
     assert.match(embed!.description, /CT 105 \(cloud\)\*\*: Nextcloud 29\.0\.1 → 29\.0\.2, 1 apt package\(s\)/);
     assert.match(embed!.description, /❌ \*\*CT 105 \(cloud\)\*\*: apt upgrade failed/);
@@ -168,9 +170,9 @@ describe('Discord digest and update results', () => {
 
 describe('targetName', () => {
   it('names containers, virtual machines and the host', () => {
-    assert.equal(targetName({ vmid: 105, containerName: 'nextcloud' }), 'CT 105 (nextcloud)');
-    assert.equal(targetName({ vmid: 137, isVm: true, containerName: 'debian' }), 'VM 137 (debian)');
-    assert.equal(targetName({ vmid: 0, isNode: true, containerName: 'pve' }), 'Proxmox host (pve)');
+    assert.equal(targetName({ vmid: 105, targetKind: 'lxc', containerName: 'nextcloud' }), 'CT 105 (nextcloud)');
+    assert.equal(targetName({ vmid: 137, targetKind: 'vm', containerName: 'debian' }), 'VM 137 (debian)');
+    assert.equal(targetName({ vmid: 0, targetKind: 'node', containerName: 'pve' }), 'Proxmox host (pve)');
   });
 });
 

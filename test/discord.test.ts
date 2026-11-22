@@ -63,19 +63,20 @@ describe('DiscordNotifier', () => {
     );
   });
 
-  it('links container notifications to the Containers page when PUBLIC_URL is set', () => {
+  it('links container notifications to the Machines page when PUBLIC_URL is set', () => {
     const notification = {
       vmid: 101,
+      targetKind: 'lxc' as const,
       containerName: 'vaultwarden',
       aptPackages: [{ name: 'curl', currentVersion: '8.0', newVersion: '8.1' }],
       apps: [{ name: 'Vaultwarden', installedVersion: '1.30.0', latestVersion: '1.32.0' }],
     };
     const payload = buildContainerPayload(notification, { ...options, publicUrl: 'https://updater.example.com' });
     const linked = payload.embeds[0]!;
-    assert.equal(linked.url, 'https://updater.example.com/containers');
-    assert.equal(linked.description.includes('Open containers'), false);
+    assert.equal(linked.url, 'https://updater.example.com/machines');
+    assert.equal(linked.description.includes('Open machines'), false);
     assert.deepEqual(payload.components, [
-      { type: 1, components: [{ type: 2, style: 5, label: 'Open containers', url: 'https://updater.example.com/containers' }] },
+      { type: 1, components: [{ type: 2, style: 5, label: 'Open machines', url: 'https://updater.example.com/machines' }] },
     ]);
 
     // Without a public URL there is nothing to link to.
@@ -90,7 +91,7 @@ describe('DiscordNotifier', () => {
       urls.push(url);
       return new Response(null, { status: 204 });
     }) as unknown as typeof globalThis.fetch;
-    const notification = { vmid: 101, containerName: 'vaultwarden', aptPackages: [], apps: [] };
+    const notification = { vmid: 101, targetKind: 'lxc' as const, containerName: 'vaultwarden', aptPackages: [], apps: [] };
 
     await new DiscordNotifier({ ...options, fetch, webhookUrl: `${options.webhookUrl}?thread_id=9` }).notifyContainerUpdates(notification);
     await new DiscordNotifier({ ...options, fetch, publicUrl: 'https://updater.example.com' }).notifyContainerUpdates(notification);

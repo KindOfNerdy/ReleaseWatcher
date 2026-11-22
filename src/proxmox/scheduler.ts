@@ -82,16 +82,22 @@ export class ContainerScheduler {
 
   /** Queues the checks due at `now` (exposed for tests). Resolves when the queue is empty. */
   tick(now: Date): Promise<void> {
-    const due = this.service.shell.isConfigured
-      ? this.store.listEnabled().filter((container) => this.scheduleOf(container)?.matches(now))
-      : [];
+    const due = this.store
+      .listEnabled()
+      .filter((container) => this.service.shellFor(container).isConfigured && this.scheduleOf(container)?.matches(now));
     // Nothing due: resolve right away instead of waiting for manual checks (keeps the run sequence moving).
     return due.length === 0 ? Promise.resolve() : this.queueAll(due.map((c) => c.id), 'schedule');
   }
 
-  /** Queues a check of all enabled containers (manual "check all"). Resolves when the queue is empty. */
+  /** Queues a check of all enabled containers that can be reached (manual "check all"). Resolves when the queue is empty. */
   checkAll(): Promise<void> {
-    return this.queueAll(this.store.listEnabled().map((c) => c.id), 'manual');
+    return this.queueAll(
+      this.store
+        .listEnabled()
+        .filter((c) => this.service.shellFor(c).isConfigured)
+        .map((c) => c.id),
+      'manual',
+    );
   }
 
   /** Queues a manual check of the given containers (e.g. after adding several at once). */

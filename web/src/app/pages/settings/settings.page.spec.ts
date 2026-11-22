@@ -12,20 +12,16 @@ const settings: AppSettings = {
   polling: { releaseCron: '*/15 * * * *', releaseCronSource: 'env', advisoryCron: '0 */6 * * *', advisoryCronSource: 'env' },
   proxmox: {
     configured: true,
-    host: 'pve.lan',
-    hostSource: 'ui',
-    port: 22,
-    user: 'root',
-    sshKeyConfigured: true,
-    sshKeySource: 'ui',
+    nodes: [
+      { id: 1, name: 'pve', configured: true, backupStorage: 'pbs' },
+      { id: 2, name: 'pve2', configured: true, backupStorage: null },
+    ],
     checkCron: '0 */6 * * *',
     checkCronSource: 'env',
     checkConcurrency: 3,
     checkConcurrencySource: null,
     minCheckConcurrency: 1,
     maxCheckConcurrency: 10,
-    backupStorage: 'pbs',
-    backupStorageSource: 'ui',
     backupBeforeUpdate: true,
     backupBeforeUpdateSource: 'ui',
   },
@@ -144,7 +140,7 @@ describe('SettingsPage', () => {
     expect(section.querySelector('.error')?.textContent).toContain('minute must be between');
   });
 
-  it('saves the Proxmox node without sending an untouched SSH key and tests the connection', async () => {
+  it('saves the container schedule and backup defaults (the connection lives under Connections)', async () => {
     await TestBed.configureTestingModule({
       imports: [SettingsPage],
       providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])],
@@ -155,31 +151,24 @@ describe('SettingsPage', () => {
     http.expectOne('/api/settings').flush(settings);
     await settle(fixture);
     http.expectOne('/api/github/rate-limit').flush(null);
-    http.expectOne('/api/proxmox/storages').flush([
-      { name: 'local', type: 'dir', status: 'active', availableBytes: 50 * 1024 ** 3 },
-      { name: 'pbs', type: 'pbs', status: 'active', availableBytes: 2 * 1024 ** 4 },
-      { name: 'nas', type: 'cifs', status: 'inactive', availableBytes: 0 },
-    ]);
     await settle(fixture);
 
     const el = fixture.nativeElement as HTMLElement;
     const section = el.querySelector<HTMLElement>('section[aria-labelledby=proxmox-title]')!;
-    const storage = section.querySelector<HTMLSelectElement>('#pve-backup-storage')!;
-    expect([...storage.options].map((o) => o.textContent?.trim())).toEqual([
-      '– none (no backups before updates) –',
-      'local (dir, 50 GB free)',
-      'pbs (pbs, 2.0 TB free)',
-      'nas (cifs, inactive)',
+    // The storage belongs to each node (edited under Connections); here it is only listed.
+    expect(section.querySelector('select#pve-backup-storage')).toBeNull();
+    const rows = [...section.querySelectorAll('.node-storages li')].map((li) =>
+      [...li.children].map((c) => c.textContent?.trim()),
+    );
+    expect(rows).toEqual([
+      ['pve', 'pbs'],
+      ['pve2', 'none – no backups'],
     ]);
-    expect(storage.value).toBe('pbs');
-    storage.value = 'local';
-    storage.dispatchEvent(new Event('change'));
     [...section.querySelectorAll<HTMLElement>('app-switch button, app-switch [role=switch]')]
       .find((b) => b.closest('app-switch')?.textContent?.includes('Back up before updates'))!
       .click();
-    expect(section.querySelector<HTMLInputElement>('#pve-host')!.value).toBe('pve.lan');
-    expect(section.querySelector<HTMLTextAreaElement>('#pve-key')!.value).toBe('');
-    expect(section.textContent).toContain('Configured (saved here)');
+    expect(section.querySelector('#pve-host')).toBeNull();
+    expect(section.textContent).toContain('Node connected');
 
     const cron = section.querySelector<HTMLInputElement>('#pve-cron')!;
     cron.value = '0 3 * * *';
@@ -192,22 +181,13 @@ describe('SettingsPage', () => {
     const save = http.expectOne('/api/settings');
     expect(save.request.method).toBe('PUT');
     expect(save.request.body).toEqual({
-      proxmoxHost: 'pve.lan',
-      proxmoxPort: 22,
-      proxmoxUser: 'root',
       containerCheckCron: '0 3 * * *',
       containerCheckConcurrency: 5,
-      backupStorage: 'local',
       backupBeforeUpdate: false,
     });
     save.flush(settings);
     await settle(fixture);
     http.expectOne('/api/status').flush({});
-
-    [...section.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes('Test connection'))!.click();
-    http.expectOne('/api/proxmox/test').flush({ output: 'pve-manager/9.1.1' });
-    await settle(fixture);
-    expect(section.querySelector('.node-test')?.textContent).toContain('pve-manager/9.1.1');
     http.verify();
   });
 
@@ -226,7 +206,6 @@ describe('SettingsPage', () => {
     });
     await settle(fixture);
     http.expectOne('/api/github/rate-limit').flush(null);
-    http.expectOne('/api/proxmox/storages').flush([]);
     await settle(fixture);
 
     const el = fixture.nativeElement as HTMLElement;

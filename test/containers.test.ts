@@ -4,10 +4,10 @@ import { buildApp, type App } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
 import { RepositoryStore } from '../src/db.ts';
 import { silentLogger } from '../src/log.ts';
-import { APT_LIST_MARKER } from '../src/proxmox/domain.ts';
+import { APT_LIST_MARKER, capabilities } from '../src/proxmox/domain.ts';
 import { ContainerStore } from '../src/proxmox/store.ts';
 import { SettingsService } from '../src/settings.ts';
-import { FakeShell, FakeSource, guestJson, HAOS_PROBE_OUTPUT, haState, RecordingNotifier, release } from './helpers.ts';
+import { addProxmoxHost, FakeShell, FakeSource, guestJson, HAOS_PROBE_OUTPUT, haState, RecordingNotifier, release } from './helpers.ts';
 
 const PCT_LIST = 'VMID       Status     Lock         Name\n101        running                 vaultwarden\n102        stopped                 old\n';
 const QM_LIST =
@@ -25,6 +25,8 @@ describe('containers API', () => {
   let baseUrl: URL;
   /** Answers requests to the Home Assistant REST API (tests never reach a real one). */
   let haFetch: (url: string, init?: RequestInit) => Promise<Response>;
+  /** The Proxmox node the containers live on. */
+  let nodeHostId: number;
 
   const request = async (method: string, url: string, payload?: unknown, headers: Record<string, string> = {}) => {
     const response = await fetch(new URL(url, baseUrl), {
@@ -34,6 +36,12 @@ describe('containers API', () => {
     });
     const text = await response.text();
     return { status: response.status, json: () => JSON.parse(text), text };
+  };
+
+  /** Sets the backup storage of the node and, if given, the global "back up before updates". */
+  const setBackupStorage = async (storage: string, backupBeforeUpdate?: boolean) => {
+    assert.equal((await request('PUT', `/api/hosts/${nodeHostId}`, { backupStorage: storage })).status, 200);
+    if (backupBeforeUpdate !== undefined) await request('PUT', '/api/settings', { backupBeforeUpdate });
   };
 
   beforeEach(async () => {
@@ -50,6 +58,7 @@ describe('containers API', () => {
     notifier = new RecordingNotifier();
     store = new RepositoryStore(':memory:');
     const settings = new SettingsService(store, loadConfig({}));
+    nodeHostId = addProxmoxHost(store).id;
     haFetch = async () => {
       throw new TypeError('Home Assistant is not reachable in this test');
     };
@@ -65,6 +74,8 @@ describe('containers API', () => {
       promptIdleMs: 40,
       homeAssistantFetch: (url, init) => haFetch(url, init),
       homeAssistantPollMs: 0,
+      machineRestartWaitMs: 0,
+      machinePollMs: 0,
       auth: { requireAuth: false },
     });
     baseUrl = app.listen({ port: 0, hostname: '127.0.0.1' }).url;
@@ -93,6 +104,8 @@ describe('containers API', () => {
       'idx_container_runs_container',
       'idx_container_runs_running',
       'idx_containers_enabled',
+      'idx_containers_host_vmid',
+      'idx_hosts_ssh_key',
       'idx_repository_advisories_page',
       'idx_sessions_expires',
       'idx_watched_repositories_enabled',
@@ -116,6 +129,7 @@ describe('containers API', () => {
     assert.equal(response.status, 201);
     const vm = response.json();
     assert.equal(vm.kind, 'vm');
+    assert.equal(vm.capabilities.homeAssistant, true);
     assert.equal(vm.name, 'debian');
     await app.containers.wait(vm.id);
 
@@ -128,7 +142,7 @@ describe('containers API', () => {
       'Processes use upgraded files: sshd',
     ]);
     assert.equal(shell.commands.some((c) => c.startsWith('pct') && !c.startsWith('pct list')), false);
-    assert.equal(notifier.containerSent.at(-1)?.isVm, true);
+    assert.equal(notifier.containerSent.at(-1)?.targetKind, 'vm');
 
     // apt upgrade runs detached on the node through the agent; the log shows the command's output, not the JSON.
     shell.on(/^qm guest exec 137 --timeout 3600 -- sh -c /, { output: guestJson('Setting up curl (8.1) ...\n', 0) });
@@ -385,7 +399,7 @@ describe('containers API', () => {
 
   it('runs apt upgrade after a backup and refreshes the state', async () => {
     const container = await addContainer();
-    await request('PUT', '/api/settings', { backupStorage: 'pbs', backupBeforeUpdate: true });
+    await setBackupStorage('pbs', true);
     shell.commands.length = 0;
     shell.on(/apt list --upgradable/, { output: `${APT_LIST_MARKER}\nListing...\n` });
     const upgrade = Promise.withResolvers<{ output: string }>();
@@ -422,7 +436,7 @@ describe('containers API', () => {
     assert.equal(notifier.resultsSent.length, 1);
     assert.deepEqual(
       { ...notifier.resultsSent[0], detail: undefined },
-      { vmid: 101, isNode: false, isVm: false, containerName: container.name, kind: 'apt-upgrade', appName: null, succeeded: false, detail: undefined },
+      { vmid: 101, targetKind: 'lxc', containerName: container.name, kind: 'apt-upgrade', appName: null, succeeded: false, detail: undefined },
     );
     assert.match(notifier.resultsSent[0]?.detail ?? '', /^Update failed/);
 
@@ -450,7 +464,7 @@ describe('containers API', () => {
     assert.deepEqual(await upgrade(), { status: 202, backedUp: false });
     assert.equal((await upgrade({ backup: true })).status, 409);
 
-    await request('PUT', '/api/settings', { backupStorage: 'local', backupBeforeUpdate: true });
+    await setBackupStorage('local', true);
     assert.deepEqual(await upgrade(), { status: 202, backedUp: true });
     assert.deepEqual(await upgrade({ backup: false }), { status: 202, backedUp: false });
 
@@ -463,7 +477,7 @@ describe('containers API', () => {
 
   it('aborts the update when the backup fails', async () => {
     const container = await addContainer();
-    await request('PUT', '/api/settings', { backupStorage: 'local', backupBeforeUpdate: true });
+    await setBackupStorage('local', true);
     shell.on(/vzdump/, { exitCode: 255, output: 'ERROR: Backup of VM 101 failed - no space left\n' });
     shell.commands.length = 0;
 
@@ -481,10 +495,12 @@ describe('containers API', () => {
     assert.deepEqual((await request('GET', '/api/proxmox/storages')).json(), [
       { name: 'local', type: 'dir', status: 'active', availableBytes: 90 * 1024 },
     ]);
-    assert.equal((await request('PUT', '/api/settings', { backupStorage: 'bad name' })).status, 400);
-    const saved = (await request('PUT', '/api/settings', { backupStorage: 'pbs', backupBeforeUpdate: true })).json();
-    assert.equal(saved.proxmox.backupStorage, 'pbs');
+    assert.equal((await request('PUT', `/api/hosts/${nodeHostId}`, { backupStorage: 'bad name' })).status, 400);
+    await setBackupStorage('pbs');
+    const saved = (await request('PUT', '/api/settings', { backupStorage: 'local', backupBeforeUpdate: true })).json();
     assert.equal(saved.proxmox.backupBeforeUpdate, true);
+    assert.equal(saved.proxmox.backupStorage, undefined, 'the storage belongs to the node');
+    assert.deepEqual(saved.proxmox.nodes.map((n: { backupStorage: string | null }) => n.backupStorage), ['pbs']);
   });
 
   it('runs an application update and marks failures', async () => {
@@ -724,7 +740,7 @@ describe('containers API', () => {
 
   it('refuses to update a container that is stopped now', async () => {
     const container = await addContainer();
-    await request('PUT', '/api/settings', { backupStorage: 'local', backupBeforeUpdate: true });
+    await setBackupStorage('local', true);
     shell.on(/^pct status 101$/, { output: 'status: stopped\n' });
     shell.commands.length = 0;
 
@@ -780,7 +796,7 @@ describe('containers API', () => {
 
   it('starts a stopped container temporarily for an update, after the backup', async () => {
     const { container, state } = await stoppableContainer();
-    await request('PUT', '/api/settings', { backupStorage: 'local', backupBeforeUpdate: true });
+    await setBackupStorage('local', true);
     shell.on(/apt-get -y/, { output: 'Setting up curl (8.1) ...\n' });
 
     assert.equal((await request('POST', `/api/containers/${container.id}/apt-upgrade`)).status, 202);
@@ -820,6 +836,7 @@ describe('containers API', () => {
     assert.equal(response.status, 201);
     const node = response.json();
     assert.equal(node.kind, 'node');
+    assert.deepEqual(node.capabilities, capabilities('node'));
     assert.equal(node.name, 'pve');
     assert.equal((await request('POST', '/api/containers/node')).status, 409);
     await app.containers.wait(node.id);
@@ -831,7 +848,7 @@ describe('containers API', () => {
     assert.equal(dto.status, 'running');
     assert.equal(dto.aptUpgradable.length, 1);
     assert.equal(dto.effectiveBackupBeforeUpdate, false);
-    assert.equal(notifier.containerSent.at(-1)?.isNode, true);
+    assert.equal(notifier.containerSent.at(-1)?.targetKind, 'node');
 
     // The host has no applications, backups or temporary starts.
     const app1 = await request('POST', `/api/containers/${node.id}/apps`, { name: 'x', latestSource: 'none' });
@@ -846,7 +863,7 @@ describe('containers API', () => {
       [saved.json().aptEnabled, saved.json().startWhenStopped, saved.json().backupBeforeUpdate],
       [true, false, null],
     );
-    await request('PUT', '/api/settings', { backupStorage: 'local', backupBeforeUpdate: true });
+    await setBackupStorage('local', true);
     assert.equal((await request('POST', `/api/containers/${node.id}/apt-upgrade`, { backup: true })).status, 409);
 
     // Proxmox VE is upgraded with dist-upgrade, without vzdump and directly on the node.
@@ -930,14 +947,10 @@ describe('containers API', () => {
     assert.ok(shell.commands.includes('pct status 101'));
   });
 
-  it('never returns the SSH key and validates Proxmox settings', async () => {
-    const key = '-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----';
-    const response = await request('PUT', '/api/settings', { proxmoxHost: 'pve.lan', proxmoxSshKey: key });
-    assert.equal(response.status, 200);
-    assert.equal(response.text.includes('abc'), false);
-    assert.equal(response.json().proxmox.sshKeyConfigured, true);
-    assert.equal((await request('PUT', '/api/settings', { proxmoxSshKey: 'password123' })).status, 400);
-    assert.equal((await request('PUT', '/api/settings', { proxmoxHost: '-oProxyCommand=x' })).status, 400);
+  it('validates container settings; the connection lives in hosts, not in the settings', async () => {
+    const settings = (await request('GET', '/api/settings')).json();
+    assert.equal(settings.proxmox.configured, true);
+    assert.equal('host' in settings.proxmox || 'sshKeyConfigured' in settings.proxmox, false);
     assert.equal((await request('PUT', '/api/settings', { containerCheckCron: 'often' })).status, 400);
   });
 
@@ -963,7 +976,7 @@ describe('containers API', () => {
     shell.on(/^hostname$/, { output: 'pve\n' });
     const node = (await request('POST', '/api/containers/node')).json();
     await app.containers.wait(node.id);
-    await request('PUT', '/api/settings', { backupStorage: 'pbs', backupBeforeUpdate: true });
+    await setBackupStorage('pbs', true);
     const upgrade = Promise.withResolvers<{ output: string }>();
     shell.on(/apt-get -y/, () => upgrade.promise);
     shell.on(/\nupdate'$/, { output: 'Updated.\n' });
@@ -1016,7 +1029,7 @@ describe('containers API', () => {
 
   it('skips the remaining updates of a container after a failure and honours backup: false', async () => {
     const container = await addContainerWithUpdates();
-    await request('PUT', '/api/settings', { backupStorage: 'pbs', backupBeforeUpdate: true });
+    await setBackupStorage('pbs', true);
     shell.on(/apt-get -y/, { exitCode: 100, output: 'E: Could not get lock\n' });
     shell.commands.length = 0;
 
@@ -1032,7 +1045,7 @@ describe('containers API', () => {
 
   it('updates all pending updates of one container: apt, then applications, one backup', async () => {
     const container = await addContainerWithUpdates();
-    await request('PUT', '/api/settings', { backupStorage: 'pbs' });
+    await setBackupStorage('pbs');
     const upgrade = Promise.withResolvers<{ output: string }>();
     shell.on(/apt-get -y/, () => upgrade.promise);
     shell.on(/\nupdate'$/, { output: 'Updated.\n' });
@@ -1172,14 +1185,19 @@ describe('containers API', () => {
     await app.containers.wait(container.id);
 
     shell.on(/^systemd-run .*systemctl reboot$/, { output: '' });
+    shell.on(/^true$/, { output: '' });
     shell.commands.length = 0;
     assert.equal((await request('POST', `/api/containers/${node.id}/restart`)).status, 202);
     const run = await app.containers.wait(node.id);
     assert.equal(run?.status, 'succeeded', run?.output ?? '');
     assert.match(run?.output ?? '', /Restart scheduled/);
-    assert.deepEqual(shell.commands, [
+    // Then it waits until the host answers again and checks it.
+    assert.match(run?.output ?? '', /The Proxmox host is back[\s\S]*Checking the Proxmox host again/);
+    assert.deepEqual(shell.commands.slice(0, 2), [
       'systemd-run --quiet --unit=releasewatcher-host-restart --on-active=15 --timer-property=AccuracySec=1s systemctl reboot',
+      'true',
     ]);
+    assert.ok(shell.commands.length > 2); // + the check
   });
 
   it('refuses container actions until the node is configured', async () => {
@@ -1219,6 +1237,7 @@ describe('application detection API', () => {
     source.existing.add('dani-garcia/vaultwarden');
     store = new RepositoryStore(':memory:');
     const settings = new SettingsService(store, loadConfig({}));
+    addProxmoxHost(store);
     app = await buildApp({
       store,
       settings,
