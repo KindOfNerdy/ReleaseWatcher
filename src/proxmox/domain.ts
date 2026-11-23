@@ -207,6 +207,22 @@ export interface RunResume {
   startedContainer: boolean;
 }
 
+/**
+ * How many runs are kept per container (older ones are pruned). Checks (mostly scheduled, short output) are counted
+ * separately from updates, upgrades and restarts, so frequent checks never push the logs of the last updates out.
+ */
+export interface RunHistoryLimits {
+  /** null = keep all. */
+  checks: number | null;
+  /** null = keep all. */
+  others: number | null;
+}
+
+/** By default every run is kept; limits are opt-in (Settings → Containers). */
+export const DEFAULT_RUN_HISTORY: RunHistoryLimits = { checks: null, others: null };
+export const MIN_RUN_HISTORY = 1;
+export const MAX_RUN_HISTORY = 500;
+
 export const DEFAULT_APP_TIMEOUT_SECONDS = 30 * 60;
 export const MIN_APP_TIMEOUT_SECONDS = 10;
 export const MAX_APP_TIMEOUT_SECONDS = 6 * 60 * 60;

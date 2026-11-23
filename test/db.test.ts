@@ -6,7 +6,10 @@ import { afterEach, beforeEach, describe, it } from 'bun:test';
 import { RepositoryStore, SELF_REPOSITORY } from '../src/db.ts';
 import { SecretBox, parseKey } from '../src/secret-box.ts';
 import { AdvisoryImpacts } from '../src/advisory-impacts.ts';
-import { advisory } from './helpers.ts';
+import { Database } from 'bun:sqlite';
+import { DEFAULT_RUN_HISTORY, type RunHistoryLimits, type RunKind } from '../src/proxmox/domain.ts';
+import { ContainerStore } from '../src/proxmox/store.ts';
+import { addProxmoxHost, advisory } from './helpers.ts';
 
 const box = () => new SecretBox(parseKey(Buffer.alloc(32, 3).toString('base64')));
 
@@ -129,5 +132,112 @@ describe('RepositoryStore advisories', () => {
     impacts.refresh();
     assert.deepEqual(affects(), [['GHSA-a', true, ['0.1.0']]]);
     assert.deepEqual(store.advisorySummaries().get(repo.id), { total: 1, affecting: 1, highestSeverity: 'high' });
+  });
+});
+
+describe('RepositoryStore file size', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'rw-size-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  const pragma = (db: Database, name: string) => Object.values(db.query(`PRAGMA ${name}`).get() as object)[0] as number;
+
+  it('keeps the last checks and the last other runs of a container separately', () => {
+    const store = new RepositoryStore(':memory:');
+    let limits: RunHistoryLimits = { ...DEFAULT_RUN_HISTORY };
+    const containers = new ContainerStore(store.database, store.secretBox, () => limits);
+    const host = addProxmoxHost(store).id;
+    const [web, db] = [containers.add(host, 101, 'web'), containers.add(host, 102, 'db')];
+    const finish = (containerId: number, kind: RunKind) => {
+      const run = containers.startRun(containerId, null, kind, 'schedule');
+      containers.finishRun({ ...run, status: 'succeeded', finishedAt: new Date().toISOString(), exitCode: 0, output: 'x' });
+      return run.id;
+    };
+    const ids = (containerId: number, check: boolean) =>
+      containers
+        .listRuns(containerId, 1000)
+        .filter((r) => (r.kind === 'check') === check)
+        .map((r) => r.id);
+    // No limits by default: every run is kept.
+    const kept = Array.from({ length: 60 }, () => finish(web.id, 'check'));
+    assert.deepEqual(ids(web.id, true), kept.reverse());
+    assert.equal(containers.pruneRuns(), 0);
+
+    limits = { checks: 10, others: 30 };
+    const updates = Array.from({ length: 32 }, () => finish(web.id, 'apt-upgrade'));
+    const checks = Array.from({ length: 50 }, () => finish(web.id, 'check'));
+    const dbChecks = Array.from({ length: 5 }, () => finish(db.id, 'check'));
+
+    assert.deepEqual(ids(web.id, true), checks.slice(-10).reverse());
+    // Many checks after the updates did not push the update logs out.
+    assert.deepEqual(ids(web.id, false), updates.slice(-30).reverse());
+
+    // Lowered limits (Settings) are applied to every container at once; null keeps all runs of that kind.
+    limits = { checks: 2, others: null };
+    assert.equal(containers.pruneRuns(), 0 + 8 + 3);
+    assert.deepEqual(ids(web.id, false), updates.slice(-30).reverse());
+    limits = { checks: 2, others: 3 };
+    assert.equal(containers.pruneRuns(), 27);
+    assert.deepEqual(ids(web.id, true), checks.slice(-2).reverse());
+    assert.deepEqual(ids(web.id, false), updates.slice(-3).reverse());
+    assert.deepEqual(ids(db.id, true), dbChecks.slice(-2).reverse());
+    // A running run is never pruned.
+    const running = containers.startRun(db.id, null, 'check', 'manual');
+    limits = { checks: 1, others: 1 };
+    containers.pruneRuns();
+    assert.deepEqual(ids(db.id, true), [running.id]);
+  });
+
+  it('converts an existing file to incremental auto-vacuum and gives freed pages back', () => {
+    const path = join(dir, 'old.db');
+    // A database written by an older version: no auto_vacuum, plus free pages after a big delete.
+    const old = new Database(path);
+    old.run('PRAGMA journal_mode = WAL');
+    old.run('CREATE TABLE filler (data TEXT)');
+    old.query('INSERT INTO filler VALUES (?)').run('x'.repeat(400_000));
+    old.run('DELETE FROM filler');
+    assert.equal(pragma(old, 'auto_vacuum'), 0);
+    assert.ok(pragma(old, 'freelist_count') > 50);
+    old.close();
+
+    const store = new RepositoryStore(path, box());
+    assert.equal(pragma(store.database, 'auto_vacuum'), 2);
+    assert.equal(pragma(store.database, 'freelist_count'), 0);
+    store.close();
+
+    const fresh = new RepositoryStore(join(dir, 'new.db'), box());
+    assert.equal(pragma(fresh.database, 'auto_vacuum'), 2);
+    fresh.close();
+  });
+});
+
+describe('ContainerStore run output', () => {
+  it('stores the output of finished runs compressed and reads it back', () => {
+    const store = new RepositoryStore(':memory:');
+    const containers = new ContainerStore(store.database, store.secretBox);
+    const container = containers.add(addProxmoxHost(store).id, 101, 'web');
+    const log = Array.from({ length: 200 }, (_, i) => `Setting up package-${i} (1.${i}) …`).join('\n');
+    const storedType = (id: number) =>
+      (store.database.query('SELECT typeof(output) AS t FROM container_runs WHERE id = ?').get(id) as { t: string }).t;
+
+    const run = containers.startRun(container.id, null, 'apt-upgrade', 'manual');
+    containers.saveRunOutput(run.id, log);
+    assert.equal(storedType(run.id), 'text'); // live output stays text while running
+    containers.finishRun({ ...run, status: 'succeeded', finishedAt: new Date().toISOString(), exitCode: 0, output: log });
+    assert.equal(storedType(run.id), 'blob');
+    assert.equal(containers.getRun(run.id)?.output, log);
+
+    // A run finished before compression existed is packed at startup; short output stays text.
+    const old = containers.startRun(container.id, null, 'check', 'manual');
+    const short = containers.startRun(container.id, null, 'check', 'manual');
+    store.database.run(`UPDATE container_runs SET status = 'succeeded', output = ? WHERE id = ?`, [log, old.id]);
+    store.database.run(`UPDATE container_runs SET status = 'succeeded', output = 'ok' WHERE id = ?`, [short.id]);
+    assert.equal(containers.packFinishedOutputs(), 1);
+    assert.equal(storedType(old.id), 'blob');
+    assert.equal(containers.getRun(old.id)?.output, log);
+    assert.equal(containers.getRun(short.id)?.output, 'ok');
+    assert.equal(containers.packFinishedOutputs(), 0);
   });
 });

@@ -16,6 +16,10 @@ export const proxmoxSettings = (configured: boolean): AppSettings => ({
     maxCheckConcurrency: 10,
     backupBeforeUpdate: true,
     backupBeforeUpdateSource: 'ui',
+    runHistoryChecks: null,
+    runHistoryUpdates: 30,
+    minRunHistory: 1,
+    maxRunHistory: 500,
   },
   email: {
     configured: false,

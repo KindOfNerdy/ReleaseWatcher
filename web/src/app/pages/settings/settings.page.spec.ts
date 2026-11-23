@@ -24,6 +24,10 @@ const settings: AppSettings = {
     maxCheckConcurrency: 10,
     backupBeforeUpdate: true,
     backupBeforeUpdateSource: 'ui',
+    runHistoryChecks: null,
+    runHistoryUpdates: 30,
+    minRunHistory: 1,
+    maxRunHistory: 500,
   },
   email: {
     configured: false,
@@ -177,6 +181,17 @@ describe('SettingsPage', () => {
     expect(concurrency.value).toBe('3');
     concurrency.value = '5';
     concurrency.dispatchEvent(new Event('input'));
+    const historyChecks = section.querySelector<HTMLInputElement>('#pve-history-checks')!;
+    // No limit by default: the field is empty and says so.
+    expect(historyChecks.value).toBe('');
+    expect(historyChecks.placeholder).toBe('Unlimited');
+    historyChecks.value = '4';
+    historyChecks.dispatchEvent(new Event('input'));
+    // An emptied field keeps all runs again.
+    const historyUpdates = section.querySelector<HTMLInputElement>('#pve-history-updates')!;
+    expect(historyUpdates.value).toBe('30');
+    historyUpdates.value = '';
+    historyUpdates.dispatchEvent(new Event('input'));
     section.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
     const save = http.expectOne('/api/settings');
     expect(save.request.method).toBe('PUT');
@@ -184,6 +199,8 @@ describe('SettingsPage', () => {
       containerCheckCron: '0 3 * * *',
       containerCheckConcurrency: 5,
       backupBeforeUpdate: false,
+      runHistoryChecks: 4,
+      runHistoryUpdates: null,
     });
     save.flush(settings);
     await settle(fixture);
