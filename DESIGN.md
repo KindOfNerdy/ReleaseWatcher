@@ -3,7 +3,8 @@
 How ReleaseWatcher is built and how new code should look, so that changes made by different people (and their
 coding agents) stay consistent. Read it together with:
 
-- `README.md` – what the app does, configuration, API table, deployment,
+- `README.md` – short overview; the [wiki](https://github.com/Rozumek29/ReleaseWatcher/wiki) – user documentation: installation, configuration, API
+  reference (*REST API*), features,
 - `AGENTS.md` – workflow (branches, PRs, CI), commands, TypeScript rules, secrets, “common changes” checklists.
 
 This file does not repeat those; it describes the **shape** of the system, the **UI design system** and the
@@ -74,7 +75,7 @@ This file does not repeat those; it describes the **shape** of the system, the *
 
 ## 2. HTTP API conventions
 
-Full endpoint list: `README.md` → *API*. Rules for new endpoints:
+Full endpoint list: wiki → *REST API*. Rules for new endpoints:
 
 - **Paths:** `/api/<plural-resource>[/:id][/<action>]`, kebab-case, e.g. `/api/containers/:id/apt-upgrade`.
   Actions that do something (check, test, update) are `POST` to a verb sub-path.
@@ -291,7 +292,7 @@ Shared components in `web/src/app/shared/`:
 - Component styles stay under the 8 kB budget (`angular.json`); anything used by two pages belongs in
   `styles.scss` or `shared/`.
 - New page checklist: route in `app.routes.ts`, nav item (+ icon) in `app.ts`, `page-header`, loading/empty/error
-  states, spec file, README *UI* section.
+  states, spec file, wiki page of the feature (and `_Sidebar.md`).
 
 ---
 
@@ -314,8 +315,8 @@ Shared components in `web/src/app/shared/`:
 4. **HTTP:** schema + route + DTO mapper; problem responses; secrets masked; API tests.
 5. **UI contract:** `models.ts` + `ApiService` method.
 6. **UI:** page/dialog following §3 (tokens, global classes, states, a11y, copy) + spec.
-7. **Docs:** README (API table, configuration, UI section), `.env.example` for new env vars, this file if a new
-   pattern was introduced.
+7. **Docs:** wiki pages (*REST API*, *Configuration*, the feature's page), `.env.example` for new env vars, the
+   README feature list only for notable features, this file if a new pattern was introduced.
 
 ---
 

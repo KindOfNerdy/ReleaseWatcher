@@ -1,7 +1,9 @@
 # AGENTS.md
 
 Guidance for AI coding agents (and humans) working in this repository. Read `README.md` first for what the
-app does, the API, configuration and project layout – this file covers only what is not obvious from it.
+app does; the full user documentation (installation, configuration, API, features) is the
+[GitHub Wiki](https://github.com/Rozumek29/ReleaseWatcher/wiki), a separate git repository (`ReleaseWatcher.wiki.git`, see *Docs* below) – this file covers
+only what is not obvious from them.
 Architecture, API conventions and the UI design system (tokens, components, layout, interaction patterns) are
 described in `DESIGN.md` – follow it for every UI or API change so new code looks and behaves like the rest.
 
@@ -139,7 +141,17 @@ The API shape is defined twice and must be kept in sync by hand:
 - server: DTO mappers in `src/app.ts` (`toDto`, `settingsDto`, `statusDto`) and route schemas,
 - UI: `web/src/app/core/models.ts` and `web/src/app/core/api.service.ts`.
 
-When changing an endpoint, also update the API table in `README.md`.
+When changing an endpoint, also update the wiki page *REST API*.
+
+## Docs
+
+- `README.md` is a short overview (features, quick start, installation methods, links). Keep it short – details
+  belong in the wiki.
+- The wiki ([https://github.com/Rozumek29/ReleaseWatcher/wiki](https://github.com/Rozumek29/ReleaseWatcher/wiki)) is its own repository: `git clone https://github.com/Rozumek29/ReleaseWatcher.wiki.git`
+  next to this one. Page files use dashes for spaces (`REST-API.md` → `[[REST API]]`), `_Sidebar.md` is the
+  navigation. Update the affected pages whenever a change is visible to users (new setting/env var →
+  *Configuration*, endpoint → *REST API*, feature → its page, new page → `_Sidebar.md` and `Home.md`).
+  Wiki changes are pushed to its default branch directly, so push them only after the PR is merged.
 
 ## UI (`web/`)
 
@@ -165,5 +177,5 @@ When changing an endpoint, also update the API table in `README.md`.
   `src/notifiers/index.ts`; if configurable from the UI, see “New setting”.
 - **New setting:** `Settings` + `current` + `validate()` in `src/settings.ts`, env default in `src/config.ts`
   (and `.env.example`), DTO + `PUT /api/settings` schema in `src/app.ts`, `models.ts` + Settings page in
-  `web/`, README configuration table.
+  `web/`, wiki page *Configuration*.
 - **New repository field:** migration + mapping in `db.ts`, `domain.ts`, `toDto`, `models.ts`, UI.

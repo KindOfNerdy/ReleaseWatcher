@@ -111,6 +111,6 @@ done
 if [ -f "$DATA_DIR/setup-code" ]; then
   printf '  Create your account there with the setup code: \033[1m%s\033[0m\n' "$(cat "$DATA_DIR/setup-code")"
 else
-  printf '  Sign in with your account (forgot the password? see README → "Reset the login").\n'
+  printf '  Sign in with your account (forgot the password? see https://github.com/Rozumek29/ReleaseWatcher/wiki/Account-and-security#reset-the-login).\n'
 fi
 printf '  Logs:  journalctl -u releasewatcher -f\n'

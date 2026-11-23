@@ -1,4 +1,4 @@
-# ReleaseWatcher as a native systemd service (e.g. in its own Proxmox LXC). See README → "Native install (systemd)".
+# ReleaseWatcher as a native systemd service (e.g. in its own Proxmox LXC). See https://github.com/Rozumek29/ReleaseWatcher/wiki/Installation#native-install-systemd
 #
 #   install -m 644 deploy/releasewatcher.service /etc/systemd/system/
 #   systemctl daemon-reload && systemctl enable --now releasewatcher
