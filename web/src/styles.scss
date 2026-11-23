@@ -724,6 +724,16 @@ code {
   border-top: 1px solid var(--border);
 }
 
+/* The "Unsaved changes" note sits on the left of the footer buttons (in sections: after the spacer, by the save button). */
+.dialog-foot {
+  flex-wrap: wrap;
+  align-items: center;
+
+  app-unsaved-changes {
+    margin-right: auto;
+  }
+}
+
 /*
  * Header and footer stay in view, only the body scrolls. On short viewports (phones in landscape) they would leave
  * too little room for the content, so there the whole dialog scrolls as one (the rules above).
@@ -873,6 +883,27 @@ code {
 @keyframes fade-in {
   from {
     opacity: 0;
+  }
+}
+
+/*
+ * A dialog with unsaved changes refuses a backdrop click or Escape (BackdropClose `keepOpen`). `pop` stays in the list:
+ * an animation whose name remains is not restarted, so the dialog does not "open" again when the class comes or goes.
+ */
+.dialog[open].shake {
+  animation:
+    pop 0.16s ease-out,
+    shake 0.26s var(--ease-out);
+}
+
+@keyframes shake {
+  20%,
+  60% {
+    transform: translateX(-6px);
+  }
+  40%,
+  80% {
+    transform: translateX(6px);
   }
 }
 
