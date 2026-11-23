@@ -43,6 +43,7 @@ never wait for the schedule.
 | Connections | SSH keys, hosts, Docker endpoints (UI only; `PROXMOX_*` seed the first host) |
 | Notifications → Discord | `DISCORD_WEBHOOK_URL`, `DISCORD_MENTION`, `DISCORD_USERNAME` |
 | Notifications → E-mail | `SMTP_*`, `EMAIL_FROM`, `EMAIL_TO` |
+| Notifications → More channels | `NTFY_*`, `GOTIFY_*`, `TELEGRAM_*`, `SLACK_WEBHOOK_URL`, `PUSHOVER_*`, `WEBHOOK_URL` |
 | Notifications → What to send | `NOTIFICATION_DIGEST`, notification types (UI only) |
 | Appearance | per browser, not on the server ([[Appearance]]) |
 
@@ -62,6 +63,15 @@ never wait for the schedule.
 | `EMAIL_FROM` | – | `alerts@example.com` or `ReleaseWatcher <alerts@example.com>`. |
 | `EMAIL_TO` | – | Recipients, comma-separated (up to 20). |
 | `EMAIL_MAX_BODY_LENGTH` | `5000` | Release notes in e-mails are truncated to this length. |
+| `NTFY_URL` | `https://ntfy.sh` | ntfy server. |
+| `NTFY_TOPIC` | – | ntfy topic. Empty = ntfy disabled. |
+| `NTFY_TOKEN` | – | Access token (`tk_…`) or `user:password` for protected topics. |
+| `GOTIFY_URL` / `GOTIFY_TOKEN` | – | Gotify server and application token. Both needed. |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | – | Bot token from @BotFather and the chat (`-100…` or `@channelname`). Both needed. |
+| `SLACK_WEBHOOK_URL` | – | Slack incoming webhook. |
+| `PUSHOVER_USER_KEY` / `PUSHOVER_APP_TOKEN` | – | Pushover user (or group) key and application API token. Both needed. |
+| `WEBHOOK_URL` | – | Generic webhook: every notification is sent as JSON. |
+| `WEBHOOK_METHOD` | `POST` | `POST`, `PUT` or `PATCH`. Extra request headers are set in the UI only. |
 | `NOTIFICATION_DIGEST` | `false` | `true` = what one check run finds is sent as one summary per channel. |
 
 See [[Notifications]].

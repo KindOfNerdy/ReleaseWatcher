@@ -1,7 +1,8 @@
 # Notifications
 
-ReleaseWatcher sends notifications over **Discord** (webhook) and **e-mail** (built-in SMTP client). Both can be
-active at once; a failure in one channel does not block the other. Configure them in **Settings → Notifications** (or
+ReleaseWatcher sends notifications over **Discord** (webhook), **e-mail** (built-in SMTP client), **ntfy**, **Gotify**,
+**Telegram**, **Slack**, **Pushover** and a generic **webhook**. Any number of them can be active at once; a failure in
+one channel does not block the others. Configure them in **Settings → Notifications** (or
 with environment variables – [[Configuration]]).
 
 ## Discord
@@ -28,6 +29,48 @@ link to the app when `PUBLIC_URL` is set. The webhook URL is a secret: encrypted
 E-mail is enabled when the server, *From* and *To* are set. Release notes are truncated to `EMAIL_MAX_BODY_LENGTH`
 (default 5000). The password is encrypted at rest; leave the field empty to keep the saved one.
 
+## More channels
+
+Under *More channels* each channel has its own card with **Save**, **Send test** and **Remove** (removes the values
+saved in the UI; environment values apply again). Tokens, keys and webhook URLs are secrets: encrypted at rest, shown
+only masked, and an empty field keeps the saved value.
+
+| Channel | What you need | Where to get it |
+| --- | --- | --- |
+| **ntfy** | Topic; server (empty = `https://ntfy.sh`); access token only for protected topics | Subscribe to the topic in the ntfy app. On ntfy.sh anyone who knows a topic can read it – pick a hard-to-guess name. Tokens: ntfy web app → *Account → Access tokens* (`user:password` works too). |
+| **Gotify** | Server URL and an app token | Gotify → *Apps → Create application* |
+| **Telegram** | Bot token and chat ID | Message @BotFather → `/newbot`, add the bot to your chat, send it a message and read `chat.id` from `https://api.telegram.org/bot<token>/getUpdates` (groups and channels start with `-100`; a public channel can be `@name`). |
+| **Slack** | Incoming webhook URL | Slack → *Apps → Incoming WebHooks → Add to Slack* → pick a channel |
+| **Pushover** | User key and API token | User key: top of the Pushover dashboard; token: *Create an Application/API Token* |
+| **Webhook** | Any URL that accepts JSON; method `POST` (default), `PUT` or `PATCH`; optional request headers | n8n, Node-RED, Home Assistant, an Apprise API server … |
+
+ntfy and Gotify get Markdown, Telegram and Pushover HTML, Slack mrkdwn. Release notes are added while they fit the
+channel's limit (Pushover: 1024 characters, so mostly without notes); long lists end with *… and N more*. Vulnerabilities
+of high or critical severity and failed updates are sent with a higher priority (ntfy, Gotify, Pushover); finished
+updates with a low one (Telegram: silent).
+
+### Webhook payload
+
+```json
+{
+  "source": "releasewatcher",
+  "type": "release",
+  "title": "immich-app/immich v1.120.0",
+  "message": "Release\nInstalled: v1.119.1 → v1.120.0\n\n…release notes…",
+  "url": "https://github.com/immich-app/immich/releases/tag/v1.120.0",
+  "priority": "normal",
+  "events": [{ "type": "release", "release": { "owner": "immich-app", "repository": "immich", "release": { "tag": "v1.120.0", "…": "…" } } }]
+}
+```
+
+`type` is `release`, `vulnerability`, `container-updates`, `update-result`, `docker-updates` or `digest` (a summary of
+several events); `priority` is `low`, `normal` or `high`. `events` holds the notifications themselves for automations
+that need the data. Any non-2xx answer counts as a failure (`429` is retried).
+
+**Request headers** (up to 10, e.g. `Authorization: Bearer …` or `X-Api-Key`) are sent with every call and can replace
+the default `Content-Type: application/json`. Their values are encrypted at rest and never shown again: a saved header
+with an empty value field keeps its value.
+
 ## What to send
 
 Applies to every channel:
@@ -40,9 +83,11 @@ Applies to every channel:
 | **apt package updates** | on | upgradable packages in a container or on the Proxmox host |
 | **Update finished** | off | an update or apt upgrade started in ReleaseWatcher completed |
 | **Update failed** | off | an update or apt upgrade started in ReleaseWatcher failed |
+| **New Docker images** | on | a newer image was pushed for the tag a Docker/Podman container runs ([[Docker containers]]) |
 
-Each pending machine item (a package set, an app version) is notified **once**. Docker *New image* states are shown in
-the UI but are not notified.
+Each pending machine item (a package set, an app version) is notified **once**. Each new Docker image (registry digest of
+a tag) is reported once too – also while the type is switched off, so switching it on later does not report old images.
+Images that were already *New image* before the update to this version are not reported; the next push is.
 
 Limits per check: at most 5 new releases and 5 new vulnerabilities per repository.
 
@@ -53,7 +98,8 @@ per channel** when the run ends, instead of one message per item:
 
 - a run of all repositories (scheduled or *Check all now*),
 - the scheduled machine checks, or *check all* on the Machines page,
-- runs falling into the same minute (releases → vulnerabilities → containers) are combined into one summary.
+- the scheduled Docker check,
+- runs falling into the same minute (releases → vulnerabilities → containers → Docker) are combined into one summary.
 
 Checking a single repository or machine still notifies right away. Items held back for a summary are lost if the
 process stops before the run ends – they are never sent twice.
@@ -63,6 +109,7 @@ process stops before the run ends – they are never sent twice.
 **Test** next to each channel sends a sample release to that channel only (`POST /api/notifiers/test`). A `409` means
 the channel is not configured yet.
 
-## Adding another channel (Slack, Teams, ntfy…)
+## Adding another channel
 
-Not built in yet. Developers can implement the `Notifier` interface – see [[Development]].
+For a service that is not built in, use the **Webhook** channel (or an Apprise API server behind it). Developers can
+implement the `Notifier` interface (`SimpleNotifier` covers message-based services) – see [[Development]].

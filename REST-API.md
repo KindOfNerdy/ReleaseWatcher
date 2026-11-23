@@ -54,10 +54,18 @@ already have.
 | `GET` | `/api/advisories` | One page of all vulnerabilities. Query: `impact` (`all`/`affecting`/`unknown`/`unaffected`), `severity`, `source`, `q`, `limit` (1–200, default 50), `cursor`. Returns `{ items, nextCursor, total, overview }` (`total`/`overview` on the first page only) |
 | `POST` | `/api/installed-version/test` | `{ "url", "field": null, "headers": [], "repositoryId"? }` → detected version and response preview |
 | `POST` | `/api/check-all` | Check all active repositories now |
-| `GET` | `/api/notifiers` | Notifiers (`discord`, `email`) and whether they are configured |
-| `POST` | `/api/notifiers/test` | Test all enabled notifiers, or `{ "notifier": "email" }` (`409` when not configured) |
+| `GET` | `/api/notifiers` | Notifiers (`discord`, `email`, `ntfy`, `gotify`, `telegram`, `slack`, `pushover`, `webhook`) and whether they are configured |
+| `POST` | `/api/notifiers/test` | Test all enabled notifiers, or `{ "notifier": "telegram" }` (`409` when not configured) |
 | `GET` | `/api/settings` | Effective settings (secrets masked) and where each value comes from |
 | `PUT` | `/api/settings` | Partial update; omitted = keep, `null` = reset to the environment value |
+
+The settings of ntfy, Gotify, Telegram, Slack, Pushover and the webhook come as `channels.<name>` =
+`{ configured, settings: { <key>: { value, secret, configured, source } } }`; for a secret `value` is only a masked hint
+(`…abcd`). They are saved with the same keys in `PUT /api/settings` (`ntfyUrl`, `ntfyTopic`, `ntfyToken`, `gotifyUrl`,
+`gotifyToken`, `telegramBotToken`, `telegramChatId`, `slackWebhookUrl`, `pushoverUserKey`, `pushoverAppToken`,
+`webhookUrl`, `webhookMethod`). The webhook's headers come as `channels.webhook.headers` = `[{ name, hasValue }]` and are
+replaced with `webhookHeaders: [{ name, value }]` (`value: null` keeps the saved value, `null` or `[]` removes all).
+`notifications.dockerUpdates` / `notifyDockerUpdates` switches the *New Docker images* type.
 | `GET` | `/api/status` | App version, scheduled checks (`poller`, `advisoryPoller`: cron, running, last/next run), counters |
 | `GET` | `/api/github/rate-limit` | Remaining GitHub API quota |
 | `GET` | `/api/version` | `{ "version": "1.5.0" }` (public) |

@@ -148,7 +148,8 @@ Use `/var/run/docker.sock` (Container Manager) with a socket proxy as above, and
 
 - Filters **All, Updates, Version unknown**, search, grouped by source and compose project.
 - **Check** asks the endpoints and registries again now.
-- Docker states are shown in the UI only; they are not sent as notifications ([[Notifications]]).
+- A newer image of a tag a container runs is reported once as *New Docker images* ([[Notifications]]); other Docker
+  states are shown in the UI only.
 
 ## API
 

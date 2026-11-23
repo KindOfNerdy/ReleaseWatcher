@@ -20,7 +20,7 @@ contributor rules live in [`AGENTS.md`](https://github.com/Rozumek29/ReleaseWatc
 | --- | --- |
 | Install it | [[Installation]] → [[First steps]] |
 | Update ReleaseWatcher itself | [[Updating ReleaseWatcher]] |
-| Get a Discord or e-mail message for new releases | [[Repositories]], [[Notifications]] |
+| Get a Discord, e-mail, ntfy, Telegram … message for new releases | [[Repositories]], [[Notifications]] |
 | See which vulnerabilities affect what I run | [[Vulnerabilities]] |
 | Keep Proxmox containers, VMs and servers updated | [[Connections and SSH]] → [[Machines]] → [[Applications and updates]] |
 | Track Home Assistant OS updates | [[Home Assistant OS]] |
@@ -78,7 +78,7 @@ Browser (Angular UI) ──HTTP──▶ ReleaseWatcher (one Bun process, one SQ
                                  ├─ vulnerability checks ─▶ GitHub advisories, OSV.dev
                                  ├─ machine checks ───────▶ SSH ─▶ Proxmox node (pct / qm) · servers
                                  ├─ Docker checks ────────▶ Docker endpoints · registries (HEAD)
-                                 └─ notifications ────────▶ Discord webhook · SMTP
+                                 └─ notifications ────────▶ Discord · SMTP · ntfy · Gotify · Telegram · Slack · Pushover · webhook
 ```
 
 Every schedule is a cron expression in the server's time zone. See [[Configuration]].
