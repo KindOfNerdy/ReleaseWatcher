@@ -1,0 +1,1 @@
+[ReleaseWatcher](https://github.com/Rozumek29/ReleaseWatcher) · [Releases](https://github.com/Rozumek29/ReleaseWatcher/releases) · [Issues](https://github.com/Rozumek29/ReleaseWatcher/issues) · MIT License · Something wrong in this wiki? Open an issue.
