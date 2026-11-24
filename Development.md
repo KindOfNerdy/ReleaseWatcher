@@ -33,7 +33,7 @@ The Angular dev server proxies `/api` to :8080.
 | `bun run serve` | start the app without touching the UI build |
 | `bun run test` | server tests (`bun test`) + UI tests (Vitest) – use this, not plain `bun test` |
 | `bun run typecheck` | type-check the server (TypeScript 7) |
-| `bun run compile` | single-file executable (server + UI) into `dist/` |
+| `bun run build:executable` | single-file executable (server + UI) into `dist/` |
 | `bun run package` | release artifacts in `release/` |
 | `bun run deploy` | build and install/update in a Proxmox LXC |
 
@@ -71,7 +71,7 @@ src/
 test/                bun:test tests (fakes in test/helpers.ts – never real network)
 web/                 Angular UI (builds into public/)
 deploy/              systemd unit + install/uninstall scripts (embedded for --install)
-scripts/             compile, package, deploy-lxc
+scripts/             build-executable, package, deploy-lxc
 ```
 
 ## Principles
