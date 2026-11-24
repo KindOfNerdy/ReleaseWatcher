@@ -28,7 +28,7 @@ advisories: Read-only* for advisories of private repositories). → [Repositorie
 
 ## 4. Repositories
 
-**Repositories**: type `owner/repo` or paste a GitHub URL and click **Watch**. A new database already watches
+**Repositories**: type `owner/repo` or paste a GitHub, Codeberg, Gitea, Forgejo or GitLab URL and click **Watch**. A new database already watches
 ReleaseWatcher itself, so you'll see when an update is out ([[Updating ReleaseWatcher]]).
 
 The first check only stores the newest release as a **baseline** – you won't get a flood of old releases. Then set the

@@ -45,7 +45,7 @@ already have.
 | Method | Route | Description |
 | --- | --- | --- |
 | `GET` | `/api/repositories` | List watched repositories |
-| `POST` | `/api/repositories` | `{ "repository": "owner/repo", "includePrereleases": false, "githubToken"?: "github_pat_…" }` |
+| `POST` | `/api/repositories` | `{ "repository": "owner/repo", "provider"?: "gitea" \| "gitlab", "includePrereleases": false, "githubToken"?: "github_pat_…" }` – `repository` is `owner/repo` (GitHub) or the HTTPS URL of a GitHub, Gitea/Forgejo or GitLab repository; `provider` only for a host that isn't well known (detected when omitted); `githubToken` is the repository's own token on any host. Responses carry `provider` (`github`/`gitea`/`gitlab`), `host` (null on GitHub), `fullName` (`host/owner/name` outside GitHub), `url` and `avatarUrl` (null for GitLab) |
 | `PUT` | `/api/repositories/:id` | `{ "includePrereleases", "isEnabled", "installedVersionUrl"?, "installedVersionField"?, "installedVersionHeaders"?: [{ "name", "value" }], "installedVersion"?, "githubToken"?, "osvEcosystem"?, "osvPackage"?, "icon"? }` – a header with `value: null` keeps the saved value; `installedVersion` only without a URL (`400` otherwise). Response has `installedVersionSource` (`none`/`url`/`manual`) and `iconUrls` |
 | `POST` | `/api/repositories/:id/mark-installed` | Set the hand-entered installed version to the latest release (`409` with a URL or before the first release is known) |
 | `DELETE` | `/api/repositories/:id` | Stop watching |

@@ -51,12 +51,14 @@ appears even for projects that never publish releases (e.g. SearXNG).
 
 ### Repository link
 
-Linked automatically when labels name a GitHub repository:
+Linked automatically when labels name a repository on GitHub, Gitea/Forgejo or GitLab:
 
-1. your own label `releasewatcher.repo=owner/name`,
-2. otherwise `org.opencontainers.image.source`.
+1. your own label `releasewatcher.repo=owner/name` (or the URL of a repository on another host),
+2. otherwise `org.opencontainers.image.source` (e.g. `https://codeberg.org/forgejo/forgejo`),
+3. otherwise `org.opencontainers.image.url` – only when it points to GitHub.
 
-The repository is watched; one that isn't watched yet is offered with **Watch owner/name**. A link can also be chosen
+The repository is watched; one that isn't watched yet is offered with **Watch owner/name** (`host/owner/name` outside
+GitHub). A link can also be chosen
 by hand. A linked container shows *Update available* for newer releases, and its installed version counts for the
 repository's [[Vulnerabilities]].
 

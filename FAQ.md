@@ -23,8 +23,9 @@ applications and Docker containers with *System packages* switched off – e.g. 
 
 ### Is GitLab / Gitea / Codeberg supported?
 
-Not yet – releases come from the GitHub API. For apps hosted elsewhere you can still track the installed version on a
-machine with *Latest version from → A command*.
+Yes – paste the HTTPS URL of a repository on Codeberg, a Gitea or Forgejo instance or GitLab (gitlab.com or
+self-managed); see [[Repositories#gitea-forgejo-and-gitlab]]. Apps that publish releases only on a website can still be
+tracked on a machine with *Latest version from → A command*.
 
 ### Can I use Slack, Telegram, ntfy, Gotify…?
 

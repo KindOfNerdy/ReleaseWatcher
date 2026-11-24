@@ -1,11 +1,29 @@
 # Repositories
 
-The **Repositories** page lists the GitHub repositories you watch for new releases.
+The **Repositories** page lists the repositories you watch for new releases – on **GitHub**, **Gitea/Forgejo**
+(Codeberg, code.forgejo.org, gitea.com, self-hosted) or **GitLab** (gitlab.com, self-managed).
 
 ## Adding a repository
 
 Type `owner/repo` or paste any GitHub URL (`https://github.com/dani-garcia/vaultwarden`) and click **Watch**.
 Optional when adding: *Pre-releases* and a *Token for this repository*.
+
+### Gitea, Forgejo and GitLab
+
+Paste the HTTPS URL of the repository (or `host/owner/repo`), e.g. `https://codeberg.org/forgejo/forgejo`,
+`https://code.forgejo.org/forgejo/runner` or `https://gitlab.com/gitlab-org/gitlab-runner`. GitLab groups may nest
+(`gitlab.com/group/subgroup/project`); page paths such as `/-/releases` are ignored.
+
+- **Which software?** github.com, gitlab.com, codeberg.org, gitea.com and code.forgejo.org are known. For another host
+  ReleaseWatcher tries Gitea/Forgejo first, then GitLab – or pick one in the select that appears next to the URL.
+- **Tokens:** a private repository needs a token of *that* instance (Gitea/Forgejo: *Settings → Applications → Access
+  tokens*, repository read; GitLab: *Access tokens* with `read_api`). The global GitHub token is never sent to other
+  hosts.
+- **Pre-releases:** Gitea/Forgejo mark them like GitHub. GitLab has no such flag, so a release counts as a pre-release
+  when its tag says so (`-rc.1`, `-beta`, `-alpha` …) or it is scheduled for later.
+- **Vulnerabilities:** only GitHub publishes security advisories per repository – for the others set the
+  [[OSV.dev package|Vulnerabilities]].
+- Only HTTPS instances are supported. The repository is shown as `host/owner/repo`.
 
 What happens next:
 
