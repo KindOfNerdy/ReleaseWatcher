@@ -35,7 +35,7 @@ chmod 600 ~/.ssh/authorized_keys
 | Type | What it is | Used for |
 | --- | --- | --- |
 | **Proxmox node** | a PVE host (add as many as you have) | its LXC containers, VMs and the node itself |
-| **Server** | any Debian/Ubuntu machine reachable over SSH (VPS, Raspberry Pi, bare metal) | the server itself |
+| **Server** | any Linux machine reachable over SSH (VPS, Raspberry Pi, bare metal – [[Machines#supported-systems]]) | the server itself |
 
 Fields: name, **address**, **port** (22), **SSH user**, **SSH key**. A Proxmox node also has a **Backup storage**
 (*Edit* → *Backup storage*; none = no backups before updates of its guests – see [[Applications and updates]]).

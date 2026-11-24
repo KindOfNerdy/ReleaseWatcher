@@ -46,7 +46,7 @@ curl -H "X-API-Key: rw_…" https://watcher.example.com/api/status
             - field: { repositories: updatesAvailable }
               label: Updates
             - field: { containers: aptPending }
-              label: apt updates
+              label: Package updates
             - field: { containers: appUpdatesAvailable }
               label: App updates
             - field: { advisories: affecting }
@@ -74,7 +74,7 @@ curl -s -H "X-API-Key: $RW_TOKEN" https://watcher.example.com/api/repositories \
 > Field names: see `web/src/app/core/models.ts` in the repository or inspect a response – the API uses camelCase and
 > `null` for missing values.
 
-Start an apt upgrade of a machine and follow the run:
+Start a package upgrade of a machine and follow the run:
 
 ```bash
 run=$(curl -s -X POST -H "X-API-Key: $RW_TOKEN" -H 'Content-Type: application/json' \

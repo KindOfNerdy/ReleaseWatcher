@@ -2,7 +2,7 @@
 
 ### Does ReleaseWatcher update anything automatically?
 
-**No.** Schedules only *check*. apt upgrades, application updates, Home Assistant updates and restarts always start
+**No.** Schedules only *check*. Package upgrades, application updates, Home Assistant updates and restarts always start
 from a click (or an API call with a full-access token). Docker containers are never touched at all.
 
 ### Do my containers or VMs need an SSH server?
@@ -12,13 +12,14 @@ agent (VMs). Only plain servers are reached over SSH directly. See [[Connections
 
 ### Does it work without Proxmox?
 
-Yes. Release and vulnerability tracking need nothing but GitHub. Debian/Ubuntu servers can be added as *Server* hosts,
+Yes. Release and vulnerability tracking need nothing but GitHub. Linux servers can be added as *Server* hosts,
 and Docker hosts as Docker endpoints.
 
 ### Which distributions are supported on machines?
 
-apt-based ones (Debian, Ubuntu, Proxmox VE). Machines without apt can still be watched for applications and Docker
-containers with *apt packages* switched off – e.g. Alpine containers or appliances.
+Those with apt (Debian, Ubuntu, Proxmox VE), dnf/yum (Fedora, RHEL, Rocky, AlmaLinux), zypper (openSUSE), apk
+(Alpine) or pacman (Arch, CachyOS) – see [[Machines#supported-systems]]. Other machines can still be watched for
+applications and Docker containers with *System packages* switched off – e.g. Gentoo, NixOS or appliances.
 
 ### Is GitLab / Gitea / Codeberg supported?
 

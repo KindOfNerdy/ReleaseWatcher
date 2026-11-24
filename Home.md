@@ -5,7 +5,7 @@
 # ReleaseWatcher
 
 **Self-hosted release tracker for your homelab.** ReleaseWatcher tells you when the GitHub projects you run publish a
-new release or a security advisory, and keeps the apt packages and applications of your Proxmox containers, virtual
+new release or a security advisory, and keeps the system packages and applications of your Proxmox containers, virtual
 machines, servers and Docker containers up to date – from one small app with one SQLite file.
 
 This wiki is the user guide. The [README](https://github.com/Rozumek29/ReleaseWatcher#readme) is the short overview;
@@ -48,8 +48,8 @@ contributor rules live in [`AGENTS.md`](https://github.com/Rozumek29/ReleaseWatc
 
 **Machines (over SSH)**
 
-- Proxmox LXC containers, virtual machines (via the QEMU guest agent), the Proxmox node itself and plain Debian/Ubuntu
-  servers: pending **apt** packages, **application** versions, *restart needed* hints, OS version.
+- Proxmox LXC containers, virtual machines (via the QEMU guest agent), the Proxmox node itself and plain Linux
+  servers: pending **system packages** (apt, dnf/yum, zypper, apk, pacman), **application** versions, *restart needed* hints, OS version.
 - One-click updates with live console output, optional `vzdump` backup first, temporary CPU/RAM boost.
   **Updates never run automatically.**
 - **Home Assistant OS** VMs: Core, OS, Supervisor, apps and integrations.

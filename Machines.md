@@ -18,9 +18,10 @@ First set up a key and a host – [[Connections and SSH]]. The old `/containers`
 
 ## What a check reads
 
-One check is **one SSH connection**: status + one command with the apt check and all version commands.
+One check is **one SSH connection**: status + one command with the package check and all version commands.
 
-- **apt packages** – `apt-get update` + `apt list --upgradable` (switch *apt packages* off for appliances without apt).
+- **System packages** – with the package manager found on the machine (see [Supported systems](#supported-systems));
+  switch *System packages* off for appliances without one.
 - **Applications** – installed and latest version of each app ([[Applications and updates]]).
 - **Restart needed** – see below.
 - **Operating system** – `/etc/os-release` (+ Debian point release, and `pveversion` on the node), e.g.
@@ -43,7 +44,7 @@ One check is **one SSH connection**: status + one command with the apt check and
 | --- | --- |
 | Name | display name |
 | **Active (scheduled checks)** | off = no scheduled checks (manual still possible) |
-| **apt packages** | check and upgrade apt |
+| **System packages** | check and upgrade the system packages (apt, dnf, zypper, apk, pacman …) |
 | **Docker containers** | list Docker/Podman containers during checks; off forgets them |
 | **Check schedule** | cron; empty = global default |
 | **Backup before updates** | default for this machine; empty = global (`BACKUP_BEFORE_UPDATE`) |
@@ -63,11 +64,11 @@ One check is **one SSH connection**: status + one command with the apt check and
 
 - Need the **QEMU guest agent**: install `qemu-guest-agent` in the VM and enable *QEMU Guest Agent* in the VM's
   Proxmox **Options**. No SSH server in the VM is needed.
-- Checks, apt upgrades, applications, backups, temporary starts (`qm start`, waiting up to 3 minutes for the agent) and
+- Checks, package upgrades, applications, backups, temporary starts (`qm start`, waiting up to 3 minutes for the agent) and
   restarts work like for containers.
 - Differences: the output of an update appears when it has **finished** (the agent returns it at the end), and VMs are
   **not resized** for updates.
-- Appliances without apt: switch *apt packages* off.
+- Appliances without a package manager: switch *System packages* off.
 
 ```bash
 # inside a Debian/Ubuntu VM
@@ -84,15 +85,34 @@ qm set <vmid> --agent enabled=1
 
 ## Servers (VPS and other Linux machines)
 
-Any Debian/Ubuntu machine reachable over SSH, no Proxmox needed. **Add server** takes address, port, user and SSH key;
+Any Linux machine reachable over SSH ([supported systems](#supported-systems)), no Proxmox needed. **Add server** takes address, port, user and SSH key;
 it is watched right away.
 
 - Commands run directly on the server (`sh -lc` over SSH; a non-root user needs passwordless `sudo`).
-- apt is checked with `apt list --upgradable` and upgraded with `apt-get upgrade` (not `dist-upgrade`), without a
-  backup. Applications work like in containers.
+- System packages are checked and upgraded with the server's package manager (apt: `apt-get upgrade`, not
+  `dist-upgrade`), without a backup. Applications work like in containers.
+- Servers without systemd (e.g. Alpine with OpenRC) work too: updates run in a session of their own (`setsid`) and
+  are stopped at their timeout like a systemd unit.
 - **Restart server** schedules `systemctl reboot`, waits until SSH answers again and checks it. It waits for running
   checks and updates of that server first.
 - Removing the server on the Machines page also removes its host (and the other way round); the SSH key stays.
+
+## Supported systems
+
+The check finds the package manager by itself and shows its name on the machine ("apk", "dnf" …):
+
+| Package manager | Systems | Check | Upgrade |
+| --- | --- | --- | --- |
+| apt | Debian, Ubuntu, Devuan, Proxmox VE | `apt-get update` + `apt list --upgradable` | `apt-get upgrade` + `autoremove` (node: `dist-upgrade`) |
+| dnf / yum | Fedora, RHEL, Rocky, AlmaLinux, CentOS, Amazon Linux | `dnf check-update --refresh` (installed versions from `rpm`) | `dnf upgrade --refresh` / `yum update` |
+| zypper | openSUSE Leap, Tumbleweed, SLES | `zypper refresh` + `zypper list-updates` | `zypper update` (Tumbleweed/Slowroll: `zypper dup`) |
+| apk | Alpine | `apk update` + `apk version -l '<'` | `apk upgrade` |
+| pacman | Arch, CachyOS, Manjaro, EndeavourOS | `pacman -Qu` against a copy of the sync databases (like `checkupdates`) | keyrings first, then `pacman -Su` |
+
+All upgrades run without questions (`-y`, `--noconfirm`, `-n`). Machines without any of these (e.g. Gentoo, NixOS,
+appliances) report *No supported package manager found* – switch *System packages* off and they are still watched for
+applications, Docker containers and restarts. CentOS 7 and other end-of-life releases fail when their repositories are
+offline.
 
 ## Restart needed
 
@@ -100,7 +120,8 @@ Every check also looks for:
 
 - `/var/run/reboot-required` (with the packages that asked for it),
 - in containers and VMs: processes still using executables or libraries replaced by an upgrade (like `needrestart`),
-- on the node and in VMs: a running kernel older than the newest one in `/boot`.
+- on the node, in VMs and on servers: a running kernel older than the newest one in `/boot` (kernels named by flavour,
+  like Alpine's `vmlinuz-lts`, are ignored).
 
 The reasons are shown with a **Restart** button (after a confirmation):
 
@@ -108,7 +129,7 @@ The reasons are shown with a **Restart** button (after a confirmation):
 | --- | --- |
 | LXC / VM | `pct reboot` / `qm reboot` (detached, so it also works for the container ReleaseWatcher runs in), then a check |
 | Node | reboot scheduled 15 s later with `systemd-run`; refused while other checks or updates run |
-| Server | `systemctl reboot`, wait for SSH, check |
+| Server | reboot scheduled 15 s later (`systemd-run`, or `reboot` in its own session without systemd), wait for SSH, check |
 
 **Restarts never happen automatically.**
 

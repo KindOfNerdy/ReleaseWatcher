@@ -1,7 +1,7 @@
 # Home Assistant OS
 
 A **Home Assistant OS** virtual machine on a Proxmox node is recognised automatically by every check
-(`ID=haos` in `/etc/os-release`). apt is then switched off and ReleaseWatcher shows Home Assistant's own updates.
+(`ID=haos` in `/etc/os-release`). *System packages* are then switched off and ReleaseWatcher shows Home Assistant's own updates.
 
 ## Requirements
 

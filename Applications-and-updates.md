@@ -1,6 +1,6 @@
 # Applications and updates
 
-Besides apt packages, every machine can have **applications**: software whose installed version ReleaseWatcher reads
+Besides system packages, every machine can have **applications**: software whose installed version ReleaseWatcher reads
 and compares with the latest one, and which it can update with your command.
 
 ## Applications
@@ -49,11 +49,11 @@ The GitHub repository comes from a built-in list or from the `# Source:` line of
 
 | Action | What runs |
 | --- | --- |
-| **apt upgrade** (LXC, VM) | `apt-get -y upgrade` + `apt-get -y autoremove`, keeping existing config files |
-| **apt upgrade** (Proxmox node) | `apt-get dist-upgrade` + `apt-get autoremove`, no backup |
-| **apt upgrade** (server) | `apt-get upgrade` (not `dist-upgrade`), no backup |
+| **Package upgrade** (LXC, VM) | the package manager's upgrade ([[Machines#supported-systems]]); apt: `apt-get -y upgrade` + `apt-get -y autoremove`, keeping existing config files |
+| **Package upgrade** (Proxmox node) | `apt-get dist-upgrade` + `apt-get autoremove`, no backup |
+| **Package upgrade** (server) | the package manager's upgrade (apt: `apt-get upgrade`, not `dist-upgrade`), no backup |
 | **Update** of an app | its update command |
-| **Update all (n)** on a machine | apt first, then every app with an update; a failure skips the rest of that machine |
+| **Update all (n)** on a machine | system packages first, then every app with an update; a failure skips the rest of that machine |
 
 Every update asks for confirmation, with a **Backup first** checkbox where backups are possible. The console output is
 shown live (VMs: at the end) and stored in the **run history**. Only **one task per machine** runs at a time.
@@ -61,7 +61,7 @@ shown live (VMs: at the end) and stored in the **run history**. Only **one task 
 ### Updating several machines
 
 **Update** in the Machines page header first shows checkboxes, with every machine that has pending updates ticked. A
-second click updates the ticked machines **one after another** (apt first, then applications). The Proxmox node and
+second click updates the ticked machines **one after another** (system packages first, then applications). The Proxmox node and
 stopped containers that may not be started are left out.
 
 ## Backups before updates
@@ -87,6 +87,9 @@ in `/var/tmp/releasewatcher/`). The SSH connection only streams the output:
 
 - a dropped connection is re-established and the output re-read,
 - after a restart of ReleaseWatcher it re-attaches and finishes the run.
+
+On a server without systemd (e.g. Alpine with OpenRC) the same works with a small supervisor started by `setsid`: it
+writes its process ID next to the output and stops the whole process group at the timeout.
 
 So you can even update the container ReleaseWatcher runs in – see [[Updating ReleaseWatcher]].
 

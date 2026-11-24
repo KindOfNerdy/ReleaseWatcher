@@ -60,7 +60,7 @@ endpoint** under Settings → Connections. → [[Docker containers]]
 | --- | --- |
 | **Repositories** | watched repositories, latest/installed version, update and vulnerability badges; filters *All, Active, Paused, Updates, Vulnerable, Errors*; list or grid layout |
 | **Vulnerabilities** | advisories of all repositories; filters *Affects installed, Unknown, Not affected, All* |
-| **Machines** | containers, VMs, nodes and servers with apt/app updates; filters *All, Updates, Errors*, sort *Needs attention first / VMID / Name* |
+| **Machines** | containers, VMs, nodes and servers with package/app updates; filters *All, Updates, Errors*, sort *Needs attention first / VMID / Name* |
 | **Docker** | containers of machines and endpoints, grouped by compose project; filters *All, Updates, Version unknown* |
 | **Settings** | tabs *General, Connections, Notifications, Appearance* |
 | **Account** | user name, password, passkeys, sessions, API tokens |
