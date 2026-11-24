@@ -1,6 +1,6 @@
 # Notifications
 
-ReleaseWatcher sends notifications over **Discord** (webhook), **e-mail** (built-in SMTP client), **ntfy**, **Gotify**,
+ReleaseWatcher sends notifications over **Discord** (webhook), **e-mail** (SMTP), **ntfy**, **Gotify**,
 **Telegram**, **Slack**, **Pushover** and a generic **webhook**. Any number of them can be active at once; a failure in
 one channel does not block the others. Configure them in **Settings → Notifications** (or
 with environment variables – [[Configuration]]).
@@ -22,7 +22,7 @@ link to the app when `PUBLIC_URL` is set. The webhook URL is a secret: encrypted
 | --- | --- |
 | SMTP server / Port | e.g. `smtp.gmail.com` / `587` |
 | Security | `starttls` (usually 587), `tls` (usually 465) or `none`; certificates are always verified |
-| User name / Password | AUTH PLAIN or LOGIN; empty = no login. Gmail and Outlook need an **app password** (account security settings → App passwords) |
+| User name / Password | The method (PLAIN, LOGIN, CRAM-MD5 …) is picked automatically; empty = no login. Gmail and Outlook need an **app password** (account security settings → App passwords) |
 | From | `alerts@example.com` or `ReleaseWatcher <alerts@example.com>` |
 | To | comma-separated, up to 20 recipients |
 

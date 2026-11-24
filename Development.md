@@ -45,8 +45,8 @@ bun run typecheck && bun run test && bun run build
 
 ## Tech stack
 
-- **Server:** Bun 1.4 (`Bun.serve`, `bun:sqlite`, TypeScript run natively, no build step). The only runtime dependency
-  is `@simplewebauthn/server` (passkeys).
+- **Server:** Bun 1.4 (`Bun.serve`, `bun:sqlite`, TypeScript run natively, no build step). The only runtime dependencies
+  are `@simplewebauthn/server` (passkeys), `jose` (OpenID Connect ID tokens) and `nodemailer` (e-mail over SMTP).
 - **UI:** Angular 22 – standalone components, signals, zoneless, no component library.
 - **Storage:** SQLite with append-only migrations (`PRAGMA user_version`).
 

@@ -59,7 +59,7 @@ never wait for the schedule.
 | `SMTP_HOST` | – | SMTP server. E-mail is enabled when host, `EMAIL_FROM` and `EMAIL_TO` are set. |
 | `SMTP_PORT` | `587` | SMTP port. |
 | `SMTP_SECURITY` | `starttls` | `starttls` (usually 587), `tls` (usually 465) or `none`. Certificates are always verified. |
-| `SMTP_USERNAME` / `SMTP_PASSWORD` | – | Login (AUTH PLAIN or LOGIN); empty = no login. |
+| `SMTP_USERNAME` / `SMTP_PASSWORD` | – | Login (PLAIN, LOGIN, CRAM-MD5 … picked automatically); empty = no login. |
 | `EMAIL_FROM` | – | `alerts@example.com` or `ReleaseWatcher <alerts@example.com>`. |
 | `EMAIL_TO` | – | Recipients, comma-separated (up to 20). |
 | `EMAIL_MAX_BODY_LENGTH` | `5000` | Release notes in e-mails are truncated to this length. |
