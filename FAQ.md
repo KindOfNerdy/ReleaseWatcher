@@ -73,7 +73,8 @@ On a 64-bit OS, yes (`linux/arm64` image or the `linux-arm64` release). 32-bit A
 
 ### Can I change the colours?
 
-Yes – theme and accent colour per browser: [[Appearance]].
+Yes – theme, accent colour and the order of the sidebar pages (the first one is the start page), per browser:
+[[Appearance]].
 
 ### How do I know a new ReleaseWatcher version is out?
 

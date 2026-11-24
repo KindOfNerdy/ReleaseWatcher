@@ -50,7 +50,7 @@ endpoint** under Settings → Connections. → [[Docker containers]]
 
 ## 7. Make it yours
 
-- **Settings → Appearance** – theme and accent colour ([[Appearance]]).
+- **Settings → Appearance** – theme, accent colour and the order of the sidebar pages ([[Appearance]]).
 - **Account → API tokens** – a read-only token for your dashboard ([[API tokens]]).
 - Set `TZ` so cron schedules follow your local time ([[Configuration]]).
 
