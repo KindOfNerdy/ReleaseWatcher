@@ -1,7 +1,7 @@
 # Account and security
 
-The UI and the API require a login – **one account** that signs in with a **password** and/or **passkeys**. Manage it
-on the **Account** page.
+The UI and the API require a login – **one account** that signs in with a **password**, **passkeys** and/or
+**single sign-on** (OpenID Connect). Manage it on the **Account** page.
 
 > [!CAUTION]
 > **The UI can run commands as root on your Proxmox nodes and servers.** Keep it on a private network or behind HTTPS
@@ -29,17 +29,45 @@ Sign in with Windows Hello, Touch ID, your phone or a security key – no passwo
 - `PUBLIC_URL` pins the relying party: passkeys are bound to that host name – changing it later makes existing
   passkeys unusable.
 
-### Passkeys only
+## Single sign-on (OpenID Connect)
 
-With at least one passkey, **Allow password sign-in** can be switched off (confirmed with the current password):
+Sign in through the identity provider you already use for your self-hosted apps – Pocket ID, Authentik, Keycloak,
+Authelia or any other OpenID Connect provider. It is still the same single account: it is **linked to one identity**
+(issuer + subject) at the provider.
+
+1. At the provider, create an OIDC client (confidential with a secret, or public) with the redirect URI
+   `https://<your address>/api/auth/oidc/callback` – *Account → Single sign-on* shows the exact value with a *Copy*
+   button. Set `PUBLIC_URL` behind a reverse proxy so the address is right.
+2. *Account → Single sign-on*: enter the **issuer URL** (the discovery URL `…/.well-known/openid-configuration` works
+   too), the **client ID**, the **client secret** (empty for a public client) and optionally the **button name**
+   (e.g. *Pocket ID*), then *Save provider* with the current password. The same values can come from `OIDC_ISSUER`,
+   `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` and `OIDC_NAME` ([[Configuration]]); saved values override them.
+3. *Link with …* opens the provider; after signing in there the account is linked to that identity.
+
+The sign-in screen then shows **Sign in with …**. Another user of the same provider is refused.
+
+- Authorization code flow with PKCE (S256), `state` and `nonce`; a short-lived `SameSite=Lax` cookie ties the redirect
+  back to the browser that started it. The ID token is verified against the provider's keys (issuer, audience, expiry);
+  providers that sign it with the client secret (HS256) work too. Scopes: `openid profile email`.
+- The client secret is a secret: encrypted at rest, shown only masked.
+- Sessions opened with single sign-on show *Single sign-on* in the session list; unlinking signs them out.
+- Pointing the settings at another issuer removes the link – link again afterwards.
+- API tokens are not affected.
+
+## Turning password sign-in off
+
+With at least one passkey or a linked single sign-on, **Allow password sign-in** (*Account → Passkeys*) can be switched
+off (confirmed with the current password):
 
 - the password then only confirms account changes,
 - passkey sign-ins require user verification (PIN or biometrics),
 - other sessions opened with the password are signed out,
-- the sign-in screen opens the passkey prompt right away,
-- the last passkey cannot be removed while it is off.
+- without single sign-on the sign-in screen opens the passkey prompt right away,
+- the last way in cannot be removed while it is off: the last passkey (without single sign-on), the single sign-on link
+  or its provider (without passkeys).
 
-Lost every passkey? See [Reset the login](#reset-the-login).
+Provider down or every passkey lost? Turn password sign-in back on with
+[`--enable-password-login`](#turn-password-sign-in-back-on), or [reset the login](#reset-the-login).
 
 ## Sessions
 
@@ -70,11 +98,27 @@ values, the Home Assistant access token.
 ## Hardening checklist
 
 - [ ] HTTPS via a reverse proxy, `PUBLIC_URL` and `TRUST_PROXY` set.
-- [ ] Not exposed to the internet (VPN / LAN only) – or at least passkeys only.
+- [ ] Not exposed to the internet (VPN / LAN only) – or at least password sign-in off (passkeys / single sign-on).
 - [ ] Dedicated SSH key, restricted with `from="<ip>"` in `authorized_keys` ([[Connections and SSH]]).
 - [ ] Docker via a read-only socket proxy, not the raw socket ([[Docker containers]]).
 - [ ] Dashboards use **read-only** API tokens with an expiry.
 - [ ] Backups of the data directory and of `encryption.key` / `ENCRYPTION_KEY` stored separately.
+
+## Turn password sign-in back on
+
+Password sign-in is off and neither a passkey nor single sign-on works (e.g. the provider is down) – but you still know
+the password. This only switches password sign-in on; the account, passkeys, the single sign-on link and sessions stay:
+
+```bash
+# Native / LXC (in the container)
+runuser -u releasewatcher -- env DATABASE_PATH=/var/lib/releasewatcher/releasewatcher.db \
+  /opt/releasewatcher/releasewatcher --enable-password-login
+
+# Docker
+docker run --rm -v releasewatcher-data:/data ghcr.io/rozumek29/releasewatcher:latest --enable-password-login
+```
+
+No restart is needed – sign in with the user name and password.
 
 ## Reset the login
 

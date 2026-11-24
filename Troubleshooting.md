@@ -46,6 +46,22 @@ The image runs as UID/GID `65532`. A bind-mounted directory must be writable by 
 
 Use `--reset-login` – see [Reset the login](Account-and-security#reset-the-login).
 
+### Password sign-in is off and the single sign-on provider is down
+
+Use `--enable-password-login` – see
+[Turn password sign-in back on](Account-and-security#turn-password-sign-in-back-on).
+
+### Single sign-on fails
+
+The sign-in screen shows the reason. Common ones:
+
+- *not linked to ReleaseWatcher* – you signed in as another user at the provider; link the right one on the Account
+  page.
+- *started in another browser* / *expired* – start again from the sign-in screen (the request is valid 10 minutes).
+- *redirect URI* errors at the provider – register exactly the redirect URI from *Account → Single sign-on* and set
+  `PUBLIC_URL` behind a reverse proxy.
+- *reports the issuer …* – enter the issuer exactly as the provider's discovery document names it.
+
 ### "Too many attempts" (`429`)
 
 Repeated failed logins lock the client out with growing delays – wait and try again. Behind a reverse proxy without

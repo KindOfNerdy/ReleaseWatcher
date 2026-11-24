@@ -133,10 +133,14 @@ API tokens cannot call any `/api/auth/*` route (`403`).
 
 | Method | Route | Description |
 | --- | --- | --- |
-| `GET` | `/api/auth/state` | `{ setupRequired, authenticated, username, hasPasskeys, passwordLogin }` (public) |
+| `GET` | `/api/auth/state` | `{ setupRequired, authenticated, username, hasPasskeys, passwordLogin, oidcLogin }` (public; `oidcLogin` = provider name when single sign-on works, else `null`) |
 | `POST` | `/api/auth/setup` | `{ "code", "username", "password" }` – first account only (public) |
 | `POST` | `/api/auth/login` | `{ "username", "password" }` → session cookie (public; `429` after failures, `409` when password sign-in is off) |
 | `POST` | `/api/auth/passkey/options`, `/api/auth/passkey/login` | Passkey sign-in (public) |
+| `POST` | `/api/auth/oidc/login` | Start single sign-on → `{ url }` of the provider + a binding cookie (public; `409` when not set up or not linked) |
+| `GET` | `/api/auth/oidc/callback` | Redirect URI of the provider; `303` to `/` signed in, `/account?sso=linked`, or `/login` / `/account` with `?ssoError=` (public) |
+| `GET` / `PUT` | `/api/auth/oidc` | Single sign-on settings `{ configured, issuer, clientId, hasClientSecret, clientSecretMasked, name, *Source, redirectUri, link }` / save `{ "currentPassword", "issuer"?, "clientId"?, "clientSecret"?, "name"? }` (omitted = keep, `null` = environment value) |
+| `POST` / `DELETE` | `/api/auth/oidc/link` | Start linking the account → `{ url }` / unlink (`409` while it is the only way to sign in) |
 | `POST` | `/api/auth/logout` | End the current session |
 | `PUT` | `/api/auth/account` | `{ "currentPassword", "username"?, "newPassword"?, "passwordLogin"? }` |
 | `GET` / `POST` | `/api/auth/passkeys` | List / register (after `POST /api/auth/passkeys/options`) |

@@ -26,7 +26,7 @@ contributor rules live in [`AGENTS.md`](https://github.com/Rozumek29/ReleaseWatc
 | Track Home Assistant OS updates | [[Home Assistant OS]] |
 | Track Docker / Podman containers | [[Docker containers]] |
 | Change colours and theme | [[Appearance]] |
-| Set up passkeys or a token for Homepage | [[Account and security]], [[API tokens]] |
+| Set up passkeys, single sign-on or a token for Homepage | [[Account and security]], [[API tokens]] |
 | Script against it | [[REST API]] |
 | Tune it with environment variables | [[Configuration]] |
 | Fix a problem | [[Troubleshooting]], [[FAQ]] |

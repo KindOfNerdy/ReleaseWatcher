@@ -119,6 +119,10 @@ See [[Connections and SSH]] and [[Machines]].
 | `PUBLIC_URL` | – | Public address behind a reverse proxy; pins the origin and the passkey relying party; used for links in Discord. |
 | `TRUST_PROXY` | `false` | Take the client IP from `X-Forwarded-For` – only behind a proxy that sets it. |
 | `BASIC_AUTH_USERNAME` / `BASIC_AUTH_PASSWORD` | – | Upgrade path from old Basic-auth installs ([[Account and security]]). |
+| `OIDC_ISSUER` | – | Single sign-on: issuer URL (or discovery URL) of the OpenID Connect provider. Also *Account → Single sign-on*. |
+| `OIDC_CLIENT_ID` | – | Single sign-on: client ID at the provider. |
+| `OIDC_CLIENT_SECRET` | – | Single sign-on: client secret; empty = public client (PKCE only). Secret. |
+| `OIDC_NAME` | `OIDC` | Name on the *Sign in with …* button, e.g. `Pocket ID`. |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error`, `silent`. Logs are JSON lines. |
 | `LOG_FILE` | – | Also write the log to this file. Docker: `/data/releasewatcher.log`; native: `/var/log/releasewatcher/releasewatcher.log`. |
 | `LOG_FILE_MAX_SIZE_MB` | `10` | Rotate at this size (`0` = never); the old file becomes `<file>.1`. |
