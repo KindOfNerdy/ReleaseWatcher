@@ -16,8 +16,9 @@ What happens next:
    moves forward **after each one** – a crash never causes duplicates.
 4. Drafts are ignored; pre-releases only if switched on for the repository.
 
-A new release also starts a check of every enabled machine that has an application linked to this repository, so
-*Update available* shows up there quickly ([[Applications and updates]]).
+After every check – scheduled, at start, *Check all now* or of a single repository – ReleaseWatcher also checks every
+enabled machine with an application whose latest version comes from a repository and differs from its newest release, so
+*Update available* shows up there right away ([[Applications and updates]]).
 
 ## The list
 

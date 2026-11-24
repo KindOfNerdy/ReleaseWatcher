@@ -49,7 +49,7 @@ already have.
 | `PUT` | `/api/repositories/:id` | `{ "includePrereleases", "isEnabled", "installedVersionUrl"?, "installedVersionField"?, "installedVersionHeaders"?: [{ "name", "value" }], "installedVersion"?, "githubToken"?, "osvEcosystem"?, "osvPackage"?, "icon"? }` – a header with `value: null` keeps the saved value; `installedVersion` only without a URL (`400` otherwise). Response has `installedVersionSource` (`none`/`url`/`manual`) and `iconUrls` |
 | `POST` | `/api/repositories/:id/mark-installed` | Set the hand-entered installed version to the latest release (`409` with a URL or before the first release is known) |
 | `DELETE` | `/api/repositories/:id` | Stop watching |
-| `POST` | `/api/repositories/:id/check` | Check now (incl. advisories); a new release also checks machines with a linked app (`containerChecks`) |
+| `POST` | `/api/repositories/:id/check` | Check now (incl. advisories); also checks machines whose linked app is behind the newest release (`containerChecks`) |
 | `GET` | `/api/repositories/:id/advisories` | Vulnerabilities of the repository with `source`, `affectsInstalled` (`true`/`false`/`null`), `affectedVersions` |
 | `GET` | `/api/advisories` | One page of all vulnerabilities. Query: `impact` (`all`/`affecting`/`unknown`/`unaffected`), `severity`, `source`, `q`, `limit` (1–200, default 50), `cursor`. Returns `{ items, nextCursor, total, overview }` (`total`/`overview` on the first page only) |
 | `POST` | `/api/installed-version/test` | `{ "url", "field": null, "headers": [], "repositoryId"? }` → detected version and response preview |
