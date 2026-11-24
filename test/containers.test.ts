@@ -116,6 +116,7 @@ describe('containers API', () => {
       'idx_targets_host_vmid',
       'idx_watched_repositories_enabled',
       'idx_watched_repositories_full_name',
+      'idx_watched_repositories_group',
       'idx_watched_repositories_installed_app',
       'idx_watched_repositories_installed_docker',
     ]);

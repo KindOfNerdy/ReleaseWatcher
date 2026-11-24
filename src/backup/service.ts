@@ -6,9 +6,11 @@ import { parseEndpointUrl, type DockerEndpoint } from '../docker/domain.ts';
 import type { DockerStore } from '../docker/store.ts';
 import {
   fullName,
+  normalizeGroupName,
   parseRepositoryName,
   parseRepositoryReference,
   PROVIDER_LABELS,
+  type RepositoryGroup,
   type RepositoryRef,
   validateIcon,
   type WatchedRepository,
@@ -122,6 +124,7 @@ export class BackupService {
     }
 
     const repositories = store.list();
+    const groups = groupsById(store.listGroups());
     const repoNames = repositoryRefs(repositories);
     const keyNames = hosts.keyNames();
     const targets = containers.list();
@@ -150,7 +153,7 @@ export class BackupService {
       appVersion: APP_VERSION,
       exportedAt: now.toISOString(),
       settings: exportedSettings,
-      repositories: repositories.map(exportRepository),
+      repositories: repositories.map((r) => exportRepository(r, groups)),
       hosts: hosts.listHosts().map((h) =>
         exportHost(
           h,
@@ -187,7 +190,10 @@ export class BackupService {
 
 // --- Export mappers (also used to compare existing items with the file) ---
 
-function exportRepository(r: WatchedRepository): BackupRepository {
+const groupsById = (groups: RepositoryGroup[]) => new Map(groups.map((g) => [g.id, g]));
+
+function exportRepository(r: WatchedRepository, groups: Map<number, RepositoryGroup>): BackupRepository {
+  const group = r.groupId === null ? undefined : groups.get(r.groupId);
   return {
     provider: r.provider,
     host: r.host,
@@ -196,6 +202,8 @@ function exportRepository(r: WatchedRepository): BackupRepository {
     includePrereleases: r.includePrereleases,
     isEnabled: r.isEnabled,
     icon: r.icon,
+    groupName: group?.name ?? null,
+    groupIcon: group?.icon ?? null,
     installedVersionUrl: r.installedVersionUrl,
     installedVersionField: r.installedVersionField,
     installedVersionHeaderNames: r.installedVersionHeaders.map((h) => h.name),
@@ -400,6 +408,7 @@ class ImportPlanner {
     const section = emptySection('repositories', 'Repositories');
     const { store } = this.deps;
     const existing = new Map(store.list().map((r) => [repositoryKey(r), r]));
+    const groups = groupsById(store.listGroups());
     const seen = new Set<string>();
 
     (this.input.repositories ?? []).forEach((raw, index) => {
@@ -429,7 +438,7 @@ class ImportPlanner {
         if (item.hasAccessToken && !current.accessToken) this.secrets.push(`${PROVIDER_LABELS[current.provider]} token of ${label}`);
         if (missingHeaders.length > 0) this.secrets.push(`Version URL headers of ${label} (${missingHeaders.join(', ')})`);
         // Secrets of an existing repository are kept, so they are not part of the comparison.
-        const before = { ...exportRepository(current), installedVersionHeaderNames: [], hasAccessToken: false };
+        const before = { ...exportRepository(current, groups), installedVersionHeaderNames: [], hasAccessToken: false };
         // The provider of a host is found when the repository is added and is not changed by an import.
         const after = { ...item, provider: current.provider, installedVersionHeaderNames: [], hasAccessToken: false };
         if (sameItem(before, after)) {
@@ -439,7 +448,7 @@ class ImportPlanner {
         section.updated.push(label);
         this.writes.push(() => {
           const repo = store.get(current.id)!;
-          applyRepository(repo, item);
+          applyRepository(repo, item, store);
           store.save(repo);
         });
         return;
@@ -452,7 +461,7 @@ class ImportPlanner {
       section.added.push(label);
       this.writes.push(() => {
         const repo = store.add(item.owner, item.name, item.includePrereleases, item);
-        applyRepository(repo, item);
+        applyRepository(repo, item, store);
         store.save(repo);
         this.repoIds.set(key, repo.id);
         this.repositoriesAdded++;
@@ -481,6 +490,13 @@ class ImportPlanner {
       this.error(`${path}.icon`, iconError);
       ok = false;
     }
+    const groupName = normalizeGroupName(raw.groupName);
+    const groupIcon = blank(raw.groupIcon);
+    const groupIconError = groupIcon ? validateIcon(groupIcon) : null;
+    if (groupIconError) {
+      this.error(`${path}.groupIcon`, groupIconError);
+      ok = false;
+    }
     const url = blank(raw.installedVersionUrl);
     const urlError = url ? validateVersionUrl(url) : null;
     if (urlError) {
@@ -506,6 +522,8 @@ class ImportPlanner {
       includePrereleases: raw.includePrereleases ?? false,
       isEnabled: raw.isEnabled ?? true,
       icon,
+      groupName,
+      groupIcon: groupName ? groupIcon : null,
       installedVersionUrl: url,
       installedVersionField: url ? blank(raw.installedVersionField) : null,
       installedVersionHeaderNames: url ? (raw.installedVersionHeaderNames ?? []).map((n) => n.trim()).filter(Boolean) : [],
@@ -950,7 +968,7 @@ function backupRepositoryRef(raw: NonNullable<BackupInput['repositories']>[numbe
   return { provider, host: parsed.host, owner, name };
 }
 
-function applyRepository(repo: WatchedRepository, item: BackupRepository): void {
+function applyRepository(repo: WatchedRepository, item: BackupRepository, store: RepositoryStore): void {
   if (repo.includePrereleases !== item.includePrereleases) {
     // Filter changed: force a full fetch on the next check.
     repo.releasesEtag = null;
@@ -958,6 +976,9 @@ function applyRepository(repo: WatchedRepository, item: BackupRepository): void 
   repo.includePrereleases = item.includePrereleases;
   repo.isEnabled = item.isEnabled;
   repo.icon = item.icon;
+  // The group is found by name (or created); its icon is the one in the file.
+  repo.groupId = item.groupName ? store.ensureGroup(item.groupName) : null;
+  if (repo.groupId !== null) store.updateGroup(repo.groupId, { icon: item.groupIcon });
   if (repo.installedVersionUrl !== item.installedVersionUrl || repo.installedVersionField !== item.installedVersionField) {
     // Read again by the next check.
     repo.installedVersion = null;

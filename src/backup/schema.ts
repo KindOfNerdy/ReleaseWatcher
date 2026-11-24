@@ -5,6 +5,7 @@
  */
 import { PROVIDERS } from '../domain.ts';
 import { z } from '../validation.ts';
+import { GROUP_NAME_MAX_LENGTH } from '../domain.ts';
 
 const text = (maxLength: number) => z.string().max(maxLength).nullish();
 
@@ -60,6 +61,8 @@ const repositorySchema = z.object({
   includePrereleases: z.boolean().nullish(),
   isEnabled: z.boolean().nullish(),
   icon: text(2000),
+  groupName: text(GROUP_NAME_MAX_LENGTH),
+  groupIcon: text(2000),
   installedVersionUrl: text(2000),
   installedVersionField: text(200),
   installedVersionHeaderNames: z.array(z.string().max(100)).max(50).nullish(),

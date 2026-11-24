@@ -89,6 +89,7 @@ describe('backup', () => {
     const widget = i.store.add('acme', 'widget', true);
     Object.assign(widget, {
       icon: 'sh:frigate',
+      groupId: i.store.ensureGroup('Home lab'),
       accessToken: GITHUB_TOKEN,
       installedVersionUrl: 'https://widget.example.com/api/version',
       installedVersionField: 'version',
@@ -98,6 +99,7 @@ describe('backup', () => {
       lastSeenTag: 'v1.2.0',
     });
     i.store.save(widget);
+    i.store.updateGroup(widget.groupId!, { icon: 'sh:homelab' });
     const gadget = i.store.add('acme', 'gadget', false);
     gadget.installedVersion = '2.0.0';
     i.store.save(gadget);
@@ -169,6 +171,8 @@ describe('backup', () => {
       includePrereleases: true,
       isEnabled: true,
       icon: 'sh:frigate',
+      groupName: 'Home lab',
+      groupIcon: 'sh:homelab',
       installedVersionUrl: 'https://widget.example.com/api/version',
       installedVersionField: 'version',
       installedVersionHeaderNames: ['Authorization'],
@@ -387,6 +391,7 @@ describe('backup', () => {
     assert.deepEqual(repos.map((r) => `${r.owner}/${r.name}`).sort(), ['acme/gadget', 'acme/widget', 'other/tool']);
     const updated = repos.find((r) => r.name === 'widget')!;
     assert.deepEqual([updated.includePrereleases, updated.icon, updated.accessToken], [true, 'sh:frigate', GITHUB_TOKEN]);
+    assert.deepEqual(target.store.listGroups().map((g) => [g.name, g.icon, g.id === updated.groupId]), [['Home lab', 'sh:homelab', true]]);
     assert.deepEqual(updated.installedVersionHeaders, [{ name: 'Authorization', value: HEADER_SECRET }]);
     assert.equal(repos.find((r) => r.name === 'gadget')!.accessToken, 'local-token');
     assert.equal(target.containers.list().find((c) => c.vmid === 200)!.homeAssistantToken, HA_TOKEN);
