@@ -53,7 +53,8 @@ The GitHub repository comes from a built-in list or from the `# Source:` line of
 | **Package upgrade** (Proxmox node) | `apt-get dist-upgrade` + `apt-get autoremove`, no backup |
 | **Package upgrade** (server) | the package manager's upgrade (apt: `apt-get upgrade`, not `dist-upgrade`), no backup |
 | **Update** of an app | its update command |
-| **Update all (n)** on a machine | system packages first, then every app with an update; a failure skips the rest of that machine |
+| **Flatpak update** / **Snap update** | `flatpak update -y --noninteractive` / `snap refresh` ([[Machines#flatpak-and-snap]]) |
+| **Update all (n)** on a machine | system packages first, then Flatpak and Snap, then every app with an update; a failure skips the rest of that machine |
 
 Every update asks for confirmation, with a **Backup first** checkbox where backups are possible. The console output is
 shown live (VMs: at the end) and stored in the **run history**. Only **one task per machine** runs at a time.

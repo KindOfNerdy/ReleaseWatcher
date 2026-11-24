@@ -22,6 +22,7 @@ One check is **one SSH connection**: status + one command with the package check
 
 - **System packages** – with the package manager found on the machine (see [Supported systems](#supported-systems));
   switch *System packages* off for appliances without one.
+- **Flatpak / Snap** – their pending updates where they are installed ([Flatpak and Snap](#flatpak-and-snap)).
 - **Applications** – installed and latest version of each app ([[Applications and updates]]).
 - **Restart needed** – see below.
 - **Operating system** – `/etc/os-release` (+ Debian point release, and `pveversion` on the node), e.g.
@@ -113,6 +114,19 @@ All upgrades run without questions (`-y`, `--noconfirm`, `-n`). Machines without
 appliances) report *No supported package manager found* – switch *System packages* off and they are still watched for
 applications, Docker containers and restarts. CentOS 7 and other end-of-life releases fail when their repositories are
 offline.
+
+## Flatpak and Snap
+
+Where **Flatpak** or **Snap** is installed (and works – snapd does not run in unprivileged LXC containers), every check
+also lists their pending updates; machines without them show nothing.
+
+- Flatpak: `flatpak update --appstream` + `flatpak remote-ls --updates` (versions from the AppStream data, installed
+  ones from `flatpak list`). Runtimes are named with their branch (`org.gnome.Platform//51`); without a version the
+  commit is shown.
+- Snap: `snap refresh --list` + `snap list`; an update that only changes the revision shows `(rev N)`.
+- Each appears as its own section on the machine with the list and an **Update** button (`flatpak update -y
+  --noninteractive` / `snap refresh`, *Backup first* in containers and VMs). *Update all* includes them.
+- A listing that fails (e.g. no network) keeps the previous result and shows as an error of the machine.
 
 ## Restart needed
 

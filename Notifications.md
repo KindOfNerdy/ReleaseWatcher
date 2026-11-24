@@ -80,7 +80,7 @@ Applies to every channel:
 | **New releases** | on | a watched repository published a new release (not sent if the installed version is already ≥ the release) |
 | **New vulnerabilities** | on | a security advisory was published for a watched repository – skipped when the installed version is known not to be affected |
 | **Application updates** | on | a newer version of an application in a container, VM or server |
-| **System package updates** | on | upgradable packages (apt, dnf, zypper, apk, pacman …) on a machine or the Proxmox host |
+| **System package updates** | on | upgradable packages (apt, dnf, zypper, apk, pacman …) and Flatpak / Snap updates on a machine or the Proxmox host |
 | **Update finished** | off | an update or package upgrade started in ReleaseWatcher completed |
 | **Update failed** | off | an update or package upgrade started in ReleaseWatcher failed |
 | **New Docker images** | on | a newer image was pushed for the tag a Docker/Podman container runs ([[Docker containers]]) |
