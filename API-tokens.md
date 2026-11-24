@@ -45,15 +45,15 @@ curl -H "X-API-Key: rw_…" https://watcher.example.com/api/status
           mappings:
             - field: { repositories: updatesAvailable }
               label: Updates
-            - field: { containers: aptPending }
+            - field: { targets: packagesPending }
               label: Package updates
-            - field: { containers: appUpdatesAvailable }
+            - field: { targets: appUpdatesAvailable }
               label: App updates
             - field: { advisories: affecting }
               label: Vulnerabilities
 ```
 
-Other counters in `GET /api/status`: `repositories.total` / `withErrors`, `containers.total` / `withErrors` /
+Other counters in `GET /api/status`: `repositories.total` / `withErrors`, `targets.total` / `withErrors` /
 `homeAssistantUpdatesAvailable`, `advisories.total`.
 
 ## Script examples
@@ -78,6 +78,6 @@ Start a package upgrade of a machine and follow the run:
 
 ```bash
 run=$(curl -s -X POST -H "X-API-Key: $RW_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"backup": true}' https://watcher.example.com/api/containers/3/apt-upgrade | jq -r .id)
+  -d '{"backup": true}' https://watcher.example.com/api/targets/3/packages-upgrade | jq -r .id)
 curl -s -H "X-API-Key: $RW_TOKEN" https://watcher.example.com/api/runs/$run | jq -r .status   # running, succeeded or failed
 ```

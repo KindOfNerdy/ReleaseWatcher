@@ -49,4 +49,4 @@ other update ([[Applications and updates]]).
 
 ## API
 
-`POST /api/containers/:id/home-assistant-update` with `{ "backup"?, "ids"? }` – see [[REST API]].
+`POST /api/targets/:id/home-assistant-update` with `{ "backup"?, "ids"? }` – see [[REST API]].

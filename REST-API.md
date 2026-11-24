@@ -45,8 +45,8 @@ already have.
 | Method | Route | Description |
 | --- | --- | --- |
 | `GET` | `/api/repositories` | List watched repositories |
-| `POST` | `/api/repositories` | `{ "repository": "owner/repo", "provider"?: "gitea" \| "gitlab", "includePrereleases": false, "githubToken"?: "github_pat_…" }` – `repository` is `owner/repo` (GitHub) or the HTTPS URL of a GitHub, Gitea/Forgejo or GitLab repository; `provider` only for a host that isn't well known (detected when omitted); `githubToken` is the repository's own token on any host. Responses carry `provider` (`github`/`gitea`/`gitlab`), `host` (null on GitHub), `fullName` (`host/owner/name` outside GitHub), `url` and `avatarUrl` (null for GitLab) |
-| `PUT` | `/api/repositories/:id` | `{ "includePrereleases", "isEnabled", "installedVersionUrl"?, "installedVersionField"?, "installedVersionHeaders"?: [{ "name", "value" }], "installedVersion"?, "githubToken"?, "osvEcosystem"?, "osvPackage"?, "icon"? }` – a header with `value: null` keeps the saved value; `installedVersion` only without a URL (`400` otherwise). Response has `installedVersionSource` (`none`/`url`/`manual`) and `iconUrls` |
+| `POST` | `/api/repositories` | `{ "repository": "owner/repo", "provider"?: "gitea" \| "gitlab", "includePrereleases": false, "accessToken"?: "github_pat_…" }` – `repository` is `owner/repo` (GitHub) or the HTTPS URL of a GitHub, Gitea/Forgejo or GitLab repository; `provider` only for a host that isn't well known (detected when omitted); `accessToken` is the repository's own token on any host (responses: `hasAccessToken`, `accessTokenMasked`). Responses carry `provider` (`github`/`gitea`/`gitlab`), `host` (null on GitHub), `fullName` (`host/owner/name` outside GitHub), `url` and `avatarUrl` (null for GitLab) |
+| `PUT` | `/api/repositories/:id` | `{ "includePrereleases", "isEnabled", "installedVersionUrl"?, "installedVersionField"?, "installedVersionHeaders"?: [{ "name", "value" }], "installedVersion"?, "accessToken"?, "osvEcosystem"?, "osvPackage"?, "icon"? }` – a header with `value: null` keeps the saved value; `installedVersion` only without a URL (`400` otherwise). Response has `installedVersionSource` (`none`/`url`/`manual`) and `iconUrls` |
 | `POST` | `/api/repositories/:id/mark-installed` | Set the hand-entered installed version to the latest release (`409` with a URL or before the first release is known) |
 | `DELETE` | `/api/repositories/:id` | Stop watching |
 | `POST` | `/api/repositories/:id/check` | Check now (incl. advisories); also checks machines whose linked app is behind the newest release (`containerChecks`) |
@@ -90,29 +90,29 @@ replaced with `webhookHeaders: [{ name, value }]` (`value: null` keeps the saved
 
 | Method | Route | Description |
 | --- | --- | --- |
-| `POST` | `/api/proxmox/test` | Connect to a node, returns `pveversion`. `/api/proxmox/*`, `POST /api/containers/node` and `add-all` take `?hostId=` (default: first node) |
-| `GET` | `/api/proxmox/containers` | Guests on the node (`pct list` + `qm list`) with `kind` (`lxc`/`vm`) and `added` |
+| `POST` | `/api/proxmox/test` | Connect to a node, returns `pveversion`. `/api/proxmox/*`, `POST /api/targets/node` and `add-all` take `?hostId=` (default: first node) |
+| `GET` | `/api/proxmox/guests` | Guests on the node (`pct list` + `qm list`) with `kind` (`lxc`/`vm`) and `added` |
 | `GET` | `/api/proxmox/storages` | Storages of a node (`?hostId=`) that accept backups |
-| `GET` | `/api/containers` | Watched machines (`kind`: `lxc`, `vm`, `node`, `server`) with `hostId`, `capabilities`, apps, pending updates (`aptUpgradable` – system packages of any package manager, despite the name), `packageManager` (`apt`, `dnf`, `yum`, `zypper`, `apk`, `pacman` or `null` before the first check), `appStores` (`[{ "store": "flatpak" | "snap", "label", "packages" }]` – only installed stores), `restartReasons`, `os`, `isBusy`, `activeRunId` |
-| `POST` | `/api/containers` | `{ "vmid": 101, "name"?, "hostId"? }` – add a container/VM and start a check |
-| `POST` | `/api/containers/node` | Add the Proxmox node itself (`409` when already added) |
-| `POST` | `/api/containers/add-all` | Add every container not added yet (VMs one by one) |
-| `PUT` | `/api/containers/:id` | `{ "name", "isEnabled", "aptEnabled", "backupBeforeUpdate"?, "startWhenStopped"?, "checkCron"?, "updateCores"?, "updateMemoryMb"?, "homeAssistantUrl"?, "homeAssistantToken"?, "homeAssistantInstall"?, "dockerEnabled"? }` – `null` = default/remove, omitted = keep |
-| `DELETE` | `/api/containers/:id` | Remove (`409` while a task runs) |
-| `POST` | `/api/containers/check-all` | Queue a check of all enabled machines (`202`) |
-| `POST` | `/api/containers/update-all` | Update every machine with pending updates (or `ids`) one after another; `{ "backup"?, "ids"? }` → `202` |
-| `POST` | `/api/containers/:id/update-all` | All pending updates of one machine; `{ "backup"? }` |
-| `POST` | `/api/containers/:id/check` | Start a check → `202` |
-| `POST` | `/api/containers/:id/restart` | Restart (`pct reboot` / `qm reboot` / node reboot / server reboot) → `202` (`409` while updates run) |
-| `POST` | `/api/containers/:id/flatpak-update`, `/snap-update` | Update every Flatpak / Snap application → `202`; `{ "backup"? }` (`409` when the last check did not find that store) |
-| `POST` | `/api/containers/:id/apt-upgrade` | Upgrade the system packages with the machine's package manager (node: `apt-get dist-upgrade`, no backup) → `202`; `{ "backup"? }` |
-| `POST` | `/api/containers/:id/home-assistant-update` | Install Home Assistant updates → `202`; `{ "backup"?, "ids"? }` |
-| `POST` | `/api/containers/:id/apps` | `{ "name", "versionCommand", "latestSource": "none" \| "github" \| "command", "repositoryId", "latestCommand", "updateCommand", "useTty", "timeoutSeconds", "installedVersion"? }` |
-| `PUT` / `DELETE` | `/api/containers/:id/apps/:appId` | Edit / remove an application |
-| `POST` | `/api/containers/:id/apps/:appId/mark-installed` | Set a hand-entered app version to the latest (`409` with a version command) |
-| `POST` | `/api/containers/:id/apps/:appId/update` | Run the update command → `202`; `{ "backup"? }` |
-| `POST` | `/api/containers/:id/detect-apps` | Applications found in a running machine (nothing saved) |
-| `GET` | `/api/containers/:id/runs` | Run history without output: `{ items, nextCursor }`; `?limit=` (1–100, default 20), `?cursor=` |
+| `GET` | `/api/targets` | Watched machines (`kind`: `lxc`, `vm`, `node`, `server`) with `hostId`, `capabilities`, apps, pending updates (`packageUpdates` – system packages of any package manager), `packageManager` (`apt`, `dnf`, `yum`, `zypper`, `apk`, `pacman` or `null` before the first check), `appStores` (`[{ "store": "flatpak" | "snap", "label", "packages" }]` – only installed stores), `restartReasons`, `os`, `isBusy`, `activeRunId` |
+| `POST` | `/api/targets` | `{ "vmid": 101, "name"?, "hostId"? }` – add a container/VM and start a check |
+| `POST` | `/api/targets/node` | Add the Proxmox node itself (`409` when already added) |
+| `POST` | `/api/targets/add-all` | Add every container not added yet (VMs one by one) |
+| `PUT` | `/api/targets/:id` | `{ "name", "isEnabled", "packagesEnabled", "backupBeforeUpdate"?, "startWhenStopped"?, "checkCron"?, "updateCores"?, "updateMemoryMb"?, "homeAssistantUrl"?, "homeAssistantToken"?, "homeAssistantInstall"?, "dockerEnabled"? }` – `null` = default/remove, omitted = keep |
+| `DELETE` | `/api/targets/:id` | Remove (`409` while a task runs) |
+| `POST` | `/api/targets/check-all` | Queue a check of all enabled machines (`202`) |
+| `POST` | `/api/targets/update-all` | Update every machine with pending updates (or `ids`) one after another; `{ "backup"?, "ids"? }` → `202` |
+| `POST` | `/api/targets/:id/update-all` | All pending updates of one machine; `{ "backup"? }` |
+| `POST` | `/api/targets/:id/check` | Start a check → `202` |
+| `POST` | `/api/targets/:id/restart` | Restart (`pct reboot` / `qm reboot` / node reboot / server reboot) → `202` (`409` while updates run) |
+| `POST` | `/api/targets/:id/flatpak-update`, `/snap-update` | Update every Flatpak / Snap application → `202`; `{ "backup"? }` (`409` when the last check did not find that store) |
+| `POST` | `/api/targets/:id/packages-upgrade` | Upgrade the system packages with the machine's package manager (node: `apt-get dist-upgrade`, no backup) → `202`; `{ "backup"? }` |
+| `POST` | `/api/targets/:id/home-assistant-update` | Install Home Assistant updates → `202`; `{ "backup"?, "ids"? }` |
+| `POST` | `/api/targets/:id/apps` | `{ "name", "versionCommand", "latestSource": "none" \| "repository" \| "command", "repositoryId", "latestCommand", "updateCommand", "useTty", "timeoutSeconds", "installedVersion"? }` |
+| `PUT` / `DELETE` | `/api/targets/:id/apps/:appId` | Edit / remove an application |
+| `POST` | `/api/targets/:id/apps/:appId/mark-installed` | Set a hand-entered app version to the latest (`409` with a version command) |
+| `POST` | `/api/targets/:id/apps/:appId/update` | Run the update command → `202`; `{ "backup"? }` |
+| `POST` | `/api/targets/:id/detect-apps` | Applications found in a running machine (nothing saved) |
+| `GET` | `/api/targets/:id/runs` | Run history without output: `{ items, nextCursor }`; `?limit=` (1–100, default 20), `?cursor=` |
 | `GET` | `/api/runs/:id` | One run with output; `?after=<outputCursor>` for new output only |
 
 ## Docker
