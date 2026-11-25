@@ -91,7 +91,8 @@ another account, give that repository its own token.
 
 ### Installed version shows an error
 
-Use **Test URL** in the repository settings: it shows the response. Typical causes: wrong JSON field, the endpoint
+Use **Test URL** in the repository settings: it shows the response. Typical causes: wrong JSON field, selector or
+version pattern (for a web page use the **HTML** or **Text** format, see [[Repositories]]), the endpoint
 needs an `Authorization` header, a self-signed certificate, or the URL isn't reachable **from the ReleaseWatcher
 server** (e.g. a `localhost` URL inside a Docker container).
 

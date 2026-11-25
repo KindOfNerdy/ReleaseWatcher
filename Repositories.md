@@ -109,17 +109,29 @@ shown as the repository's error.
 | **A version URL** | apps that expose their version over HTTP |
 | **Entered by hand** | desktop apps, firmware, external services, anything without an endpoint |
 
-With a URL it is read on **every check**. Accepted responses: plain text (`1.34.1`), a JSON string (`"1.34.1"`),
-common keys such as `version`, or an explicit **JSON field** path such as `data.version` (empty = detect
-automatically). **Test URL** shows the detected version and a preview of the response.
+With a URL it is read on **every check**. **Format** says how the response is read:
+
+| Format | Reads | Path / selector | Version pattern |
+| --- | --- | --- | --- |
+| **Auto** (default) | plain text (`1.34.1`), a JSON string (`"1.34.1"`), common keys such as `version`, else the first version in the text | optional **JSON field**, e.g. `data.version` | – |
+| **Text** | the text of the response (HTML tags removed) | – | **required** |
+| **JSON** | a value at a path | optional, e.g. `data.version`, `components[0].version` (empty = the whole response) | optional |
+| **HTML** / **XML** | the text of an element | **required** CSS selector, e.g. `footer .version` | optional |
+
+The first version found is used. The **version pattern** is a regular expression (case-insensitive); its first group –
+or a group named `version` – is the version, e.g. `Version:\s*(\d+\.\d+\.\d+)`. Without a pattern, an element with
+`Version 4.2.1` gives `4.2.1`. It's the same extraction as for [[Web pages and feeds]]. **Test URL** shows the
+detected version and a preview of the response.
 
 Examples:
 
-| App | URL | JSON field |
-| --- | --- | --- |
-| Vaultwarden | `https://vault.lan/api/version` | – |
-| ReleaseWatcher | `http://127.0.0.1:8080/api/version` | – |
-| an app returning `{"data":{"version":"2.1.0"}}` | `https://app.lan/api/info` | `data.version` |
+| App | URL | Format | Path / selector · pattern |
+| --- | --- | --- | --- |
+| Vaultwarden | `https://vault.lan/api/version` | Auto | – |
+| ReleaseWatcher | `http://127.0.0.1:8080/api/version` | Auto | – |
+| an app returning `{"data":{"version":"2.1.0"}}` | `https://app.lan/api/info` | Auto or JSON | `data.version` |
+| an app with the version in its page footer | `https://app.lan/about` | HTML | `footer .version` |
+| a status page saying `Server version: 3.4.1` | `https://app.lan/status` | Text | `Server version:\s*([\d.]+)` |
 
 **Request headers** (e.g. `Authorization: Bearer …`, `X-Api-Key`) are stored encrypted and never returned by the API –
 only their names. Leave a value empty to keep the saved one.
