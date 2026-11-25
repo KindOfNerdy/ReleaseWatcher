@@ -490,6 +490,55 @@ describe('HTTP API', () => {
     assert.equal((await inject({ method: 'DELETE', url: `/api/repositories/${id}` })).statusCode, 404);
   });
 
+  it('watches tags with a version pattern and re-baselines when they change', async () => {
+    const tag = (name: string) => ({ ...release(name, 1), publishedAt: '' });
+    source.releases = ['TS-25.10.8', 'TS-25.10.7', 'TrueNAS-9.10.2-U5'].map(tag);
+    const invalid = await inject({
+      method: 'POST',
+      url: '/api/repositories',
+      payload: { repository: 'acme/widget', releaseSource: 'tags', versionPattern: '^TS-(' },
+    });
+    assert.equal(invalid.statusCode, 400);
+    assert.match(invalid.json().errors.versionPattern[0], /not a valid regular expression/);
+
+    const created = await inject({
+      method: 'POST',
+      url: '/api/repositories',
+      payload: { repository: 'acme/widget', releaseSource: 'tags', versionPattern: ' ^TS-(.+)$ ' },
+    });
+    assert.equal(created.statusCode, 201);
+    const repo = created.json();
+    assert.deepEqual([repo.releaseSource, repo.versionPattern, repo.lastSeenTag], ['tags', '^TS-(.+)$', '25.10.8']);
+
+    // Omitted = keep.
+    const kept = await inject({ method: 'PUT', url: `/api/repositories/${repo.id}`, payload: { includePrereleases: false, isEnabled: true } });
+    assert.deepEqual([kept.json().releaseSource, kept.json().versionPattern, kept.json().lastSeenTag], ['tags', '^TS-(.+)$', '25.10.8']);
+
+    const badPut = await inject({
+      method: 'PUT',
+      url: `/api/repositories/${repo.id}`,
+      payload: { includePrereleases: false, isEnabled: true, versionPattern: 'x'.repeat(501) },
+    });
+    assert.equal(badPut.statusCode, 400);
+    assert.ok(badPut.json().errors.versionPattern);
+
+    // null = releases without a pattern; the baseline is reset and set again right away, without notifying.
+    source.releases = [release('v2', 2), release('v1', 1)];
+    const sent = notifier.sent.length;
+    const reset = await inject({
+      method: 'PUT',
+      url: `/api/repositories/${repo.id}`,
+      payload: { includePrereleases: false, isEnabled: true, releaseSource: null, versionPattern: null },
+    });
+    const body = reset.json();
+    assert.deepEqual(
+      [body.releaseSource, body.versionPattern, body.lastSeenTag, body.lastSeenUrl],
+      ['releases', null, 'v2', 'https://github.com/acme/widget/releases/tag/v2'],
+    );
+    assert.ok(body.lastCheckedAt);
+    assert.equal(notifier.sent.length, sent);
+  });
+
   it('lists notifiers and sends a test notification', async () => {
     assert.deepEqual((await inject('/api/notifiers')).json(), [{ name: 'recording', isEnabled: true }]);
     const test = await inject({ method: 'POST', url: '/api/notifiers/test' });

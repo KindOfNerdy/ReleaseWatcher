@@ -1,6 +1,9 @@
 /** Where a repository lives: GitHub, a Gitea/Forgejo instance (Codeberg …) or a GitLab instance. */
 export type RepositoryProvider = 'github' | 'gitea' | 'gitlab';
 
+/** What of a repository is watched: its releases, or its tags (projects that tag versions without releases). */
+export type ReleaseSourceKind = 'releases' | 'tags';
+
 export interface WatchedRepository {
   id: number;
   provider: RepositoryProvider;
@@ -20,8 +23,14 @@ export interface WatchedRepository {
   /** Custom group on the Repositories page (`RepositoryGroup`); null = none. */
   groupId: number | null;
   includePrereleases: boolean;
+  /** `releases` (newest by date) or `tags` (newest by version). */
+  releaseSource: ReleaseSourceKind;
+  /** Regular expression tags must match; with tags its group picks the version. Null = none. */
+  versionPattern: string | null;
   isEnabled: boolean;
   lastSeenTag: string | null;
+  /** Page of the latest release or tag; null without one or for a version picked by a pattern from tags. */
+  lastSeenUrl: string | null;
   lastSeenPublishedAt: string | null;
   lastCheckedAt: string | null;
   lastError: string | null;
@@ -124,6 +133,9 @@ export interface AddRepositoryRequest {
   /** Provider of a host that is not well known; omitted = detected. */
   provider?: RepositoryProvider | null;
   includePrereleases: boolean;
+  /** Releases (default) or tags. */
+  releaseSource?: ReleaseSourceKind | null;
+  versionPattern?: string | null;
   /** Token of the repository: a private one the global GitHub token cannot read, or one on another host. */
   accessToken?: string | null;
 }
@@ -131,6 +143,10 @@ export interface AddRepositoryRequest {
 export interface UpdateRepositoryRequest {
   includePrereleases: boolean;
   isEnabled: boolean;
+  /** Omit to keep, null for releases. A change makes the next check set a new baseline without notifying. */
+  releaseSource?: ReleaseSourceKind | null;
+  /** Omit to keep, null to remove. */
+  versionPattern?: string | null;
   /** Omit to keep, null to clear. */
   installedVersionUrl?: string | null;
   installedVersionField?: string | null;
