@@ -1,8 +1,24 @@
 import { compareVersions, parseVersion } from './version.ts';
+import type { WebSourceConfig } from './web-source/domain.ts';
 
-/** Where releases of a repository are read from: GitHub, a Gitea/Forgejo instance (Codeberg …) or a GitLab instance. */
-export const PROVIDERS = ['github', 'gitea', 'gitlab'] as const;
+/**
+ * Where releases of a repository are read from: GitHub, a Gitea/Forgejo instance (Codeberg …), a GitLab instance or a
+ * web page, feed or JSON API (`web`).
+ */
+export const PROVIDERS = ['github', 'gitea', 'gitlab', 'web'] as const;
 export type RepositoryProvider = (typeof PROVIDERS)[number];
+
+/** Providers of real repositories (everything a repository URL can name). */
+export const GIT_PROVIDERS = ['github', 'gitea', 'gitlab'] as const satisfies readonly RepositoryProvider[];
+
+/**
+ * `owner` of every web source: a web source is stored like a repository with `host` = the host of its URL and
+ * `name` = the name the user gave it, so its key (`fullName()`) is `host/web/name`.
+ */
+export const WEB_OWNER = 'web';
+
+/** Longest name of a web source. */
+export const WEB_SOURCE_NAME_MAX_LENGTH = 100;
 
 /** A repository on one of the {@link PROVIDERS}. */
 export interface RepositoryRef {
@@ -77,6 +93,8 @@ export interface WatchedRepository extends RepositoryRef {
   icon: string | null;
   /** Custom group (`repository_groups`) the repository is shown in on the Repositories page; null = none. */
   groupId: number | null;
+  /** Where and how a web source (provider `web`) reads its versions; null for repositories. */
+  webSource: WebSourceConfig | null;
 }
 
 /** A custom group of repositories on the Repositories page. */
@@ -202,6 +220,7 @@ export const PROVIDER_LABELS: Readonly<Record<RepositoryProvider, string>> = {
   github: 'GitHub',
   gitea: 'Gitea/Forgejo',
   gitlab: 'GitLab',
+  web: 'Web page',
 };
 
 /** Web page of a repository. */
@@ -228,17 +247,83 @@ export function releasePageUrl(
       return `${base}/${tags ? 'src/tag' : 'releases/tag'}/${tagPath(tag)}`;
     case 'gitlab':
       return `${base}/-/${tags ? 'tags' : 'releases'}/${tagPath(tag)}`;
+    case 'web':
+      // Versions of a web source have no page of their own here (see `lastSeenUrl`).
+      return `https://${repo.host}/`;
   }
 }
 
 /**
  * Page of the newest release already processed; null when there is none or the tag is a version picked by a pattern
- * (not the name of a tag).
+ * (not the name of a tag). For a web source, the page it reads.
  */
 export const lastSeenUrl = (
-  repo: Pick<WatchedRepository, 'provider' | 'host' | 'owner' | 'name' | 'releaseSource' | 'versionPattern' | 'lastSeenTag'>,
-): string | null =>
-  repo.lastSeenTag && !(repo.releaseSource === 'tags' && repo.versionPattern) ? releasePageUrl(repo, repo.lastSeenTag) : null;
+  repo: Pick<WatchedRepository, 'provider' | 'host' | 'owner' | 'name' | 'releaseSource' | 'versionPattern' | 'lastSeenTag'> &
+    Partial<Pick<WatchedRepository, 'webSource'>>,
+): string | null => {
+  if (!repo.lastSeenTag) {
+    return null;
+  }
+  if (repo.provider === 'web') {
+    return repo.webSource?.url ?? null;
+  }
+  return repo.releaseSource === 'tags' && repo.versionPattern ? null : releasePageUrl(repo, repo.lastSeenTag);
+};
+
+/** Name shown to the user: the given name of a web source, otherwise {@link fullName}. */
+export const displayName = (repo: { provider?: RepositoryProvider; host?: string | null; owner: string; name: string }): string =>
+  repo.provider === 'web' ? repo.name : fullName(repo);
+
+/** Page a repository or web source is found at: the source URL of a web source, otherwise {@link repositoryUrl}. */
+export const sourcePageUrl = (repo: Pick<WatchedRepository, 'provider' | 'host' | 'owner' | 'name' | 'webSource'>): string =>
+  repo.provider === 'web' && repo.webSource ? repo.webSource.url : repositoryUrl(repo);
+
+/** Host a web source is stored under: the host (with a non-default port) of its URL, lower-case without `www.`. */
+export const webSourceHost = (url: string): string => new URL(url).host.toLowerCase().replace(/^www\./, '');
+
+/** A web source name as stored: trimmed, inner whitespace collapsed; null when empty. */
+export const normalizeWebSourceName = (value: string | null | undefined): string | null => value?.trim().replace(/\s+/g, ' ') || null;
+
+/** Checks the name of a web source; returns a message for the user, or null when it is valid. */
+export function webSourceNameError(name: string | null): string | null {
+  if (!name) {
+    return 'Enter a name for the web source, e.g. UniFi Network.';
+  }
+  if (name.length > WEB_SOURCE_NAME_MAX_LENGTH) {
+    return `The name must be at most ${WEB_SOURCE_NAME_MAX_LENGTH} characters long.`;
+  }
+  if (name.includes('/')) {
+    // The name is part of the key `host/web/name`.
+    return 'The name must not contain a slash (/).';
+  }
+  return null;
+}
+
+/**
+ * Sets where a web source reads its versions. Like {@link setReleaseSource}, a change makes the next check establish
+ * a new baseline silently (other page, other versions). Returns true when something changed.
+ */
+export function setWebSource(repo: WatchedRepository, webSource: WebSourceConfig, versionPattern: string | null): boolean {
+  if (sameWebSource(repo.webSource, webSource) && repo.versionPattern === versionPattern) {
+    return false;
+  }
+  // The User-Agent alone does not change what is read.
+  const reset = !sameWebSource(repo.webSource, { ...webSource, userAgent: repo.webSource?.userAgent ?? null }) || repo.versionPattern !== versionPattern;
+  repo.webSource = webSource;
+  repo.versionPattern = versionPattern;
+  if (reset) {
+    repo.lastSeenTag = null;
+    repo.lastSeenPublishedAt = null;
+    repo.lastCheckedAt = null;
+  }
+  repo.releasesEtag = null;
+  return true;
+}
+
+const WEB_SOURCE_KEYS = ['url', 'format', 'items', 'version', 'date', 'link', 'userAgent'] as const satisfies readonly (keyof WebSourceConfig)[];
+
+const sameWebSource = (a: WebSourceConfig | null, b: WebSourceConfig | null): boolean =>
+  a === b || (a !== null && b !== null && WEB_SOURCE_KEYS.every((key) => a[key] === b[key]));
 
 /**
  * Avatar of the repository owner without an API call: GitHub's avatar service, the `/user/avatar/<name>/<size>` route
@@ -251,6 +336,7 @@ export function repositoryAvatarUrl(repo: Pick<RepositoryRef, 'provider' | 'host
     case 'gitea':
       return repo.host ? `https://${repo.host}/user/avatar/${encodeURIComponent(repo.owner)}/${size}` : null;
     case 'gitlab':
+    case 'web':
       return null;
   }
 }
@@ -383,9 +469,7 @@ export function selectNewReleases(
   repo: Pick<WatchedRepository, 'includePrereleases' | 'lastCheckedAt' | 'lastSeenPublishedAt' | 'lastSeenTag'>,
   releases: readonly ReleaseInfo[],
 ): ReleaseSelection {
-  const relevant = releases
-    .filter((r) => repo.includePrereleases || !r.isPrerelease)
-    .toSorted((a, b) => Date.parse(a.publishedAt) - Date.parse(b.publishedAt));
+  const relevant = releases.filter((r) => repo.includePrereleases || !r.isPrerelease).toSorted(compareReleases);
 
   const newest = relevant.at(-1) ?? null;
 
@@ -393,13 +477,31 @@ export function selectNewReleases(
     return { newReleases: [], newest };
   }
 
-  const seenAt = repo.lastSeenPublishedAt === null ? null : Date.parse(repo.lastSeenPublishedAt);
   const newReleases = relevant
-    .filter((r) => seenAt === null || Date.parse(r.publishedAt) > seenAt)
+    .filter((r) => isNewerRelease(r, repo))
     .filter((r) => r.tag !== repo.lastSeenTag)
     .slice(-MAX_NOTIFICATIONS_PER_CHECK);
 
   return { newReleases, newest };
+}
+
+/**
+ * Order of releases by publication date; releases of the same moment (sources with dates only, e.g. `2026-10-23`)
+ * by version, so the higher one counts as the newer.
+ */
+export function compareReleases(a: Pick<ReleaseInfo, 'tag' | 'publishedAt'>, b: Pick<ReleaseInfo, 'tag' | 'publishedAt'>): number {
+  return Date.parse(a.publishedAt) - Date.parse(b.publishedAt) || (compareVersions(a.tag, b.tag) ?? 0);
+}
+
+/** True when a release comes after the baseline (`lastSeenPublishedAt`, then `lastSeenTag` on the same date); true without one. */
+export function isNewerRelease(
+  release: Pick<ReleaseInfo, 'tag' | 'publishedAt'>,
+  baseline: Pick<WatchedRepository, 'lastSeenPublishedAt' | 'lastSeenTag'>,
+): boolean {
+  if (baseline.lastSeenPublishedAt === null) {
+    return true;
+  }
+  return compareReleases(release, { tag: baseline.lastSeenTag ?? '', publishedAt: baseline.lastSeenPublishedAt }) > 0;
 }
 
 /**
