@@ -20,6 +20,7 @@ const repo = (id: number, fullName: string, extra: Partial<WatchedRepository> = 
     icon: null,
     groupId: null,
     iconUrls: [],
+    webSource: null,
     includePrereleases: false,
     releaseSource: 'releases',
     versionPattern: null,
@@ -155,18 +156,27 @@ describe('RepositoriesPage', () => {
     expect(el.querySelector('.row .installed')?.textContent).toContain('1.32.0');
   });
 
-  it('keeps repositories sorted by repository name, not by owner', async () => {
+  const headerButton = (el: HTMLElement, text: string) =>
+    [...el.querySelectorAll<HTMLButtonElement>('.page-header button')].find((b) => b.textContent?.trim() === text)!;
+
+  it('adds a repository from its dialog and keeps the list sorted by repository name, not by owner', async () => {
     const { el, fixture } = await render([repo(1, 'zeta/alpha'), repo(2, 'acme/widget')]);
-    const input = el.querySelector<HTMLInputElement>('#new-repo')!;
+    expect(el.querySelector('app-add-repository-dialog form')).toBeNull();
+    headerButton(el, 'Add repository').click();
+    await settle(fixture);
+    const dialog = el.querySelector('app-add-repository-dialog')!;
+    expect(dialog.querySelector('h2')?.textContent).toContain('Add repository');
+    const input = dialog.querySelector<HTMLInputElement>('#add-repo')!;
     input.value = 'aaa/middle';
     input.dispatchEvent(new Event('input'));
     await settle(fixture);
-    el.querySelector<HTMLFormElement>('form.add-card')!.dispatchEvent(new Event('submit'));
+    dialog.querySelector('form')!.dispatchEvent(new Event('submit'));
     await settle(fixture);
     http.expectOne({ method: 'POST', url: '/api/repositories' }).flush(repo(3, 'aaa/middle'));
     await settle(fixture);
     http.match('/api/status').forEach((r) => r.flush({}));
 
+    expect(el.querySelector('app-add-repository-dialog form')).toBeNull();
     const names = [...el.querySelectorAll('.row')].map((r) => r.textContent ?? '');
     expect(names.map((t) => ['alpha', 'middle', 'widget'].find((n) => t.includes(n)))).toEqual([
       'alpha',
@@ -175,34 +185,89 @@ describe('RepositoriesPage', () => {
     ]);
   });
 
-  it('offers a provider choice only for a host it does not know', async () => {
+  it('offers both ways to add in the empty state', async () => {
     const { el, fixture } = await render([]);
-    const input = el.querySelector<HTMLInputElement>('#new-repo')!;
-    const type = async (value: string) => {
+    const actions = [...el.querySelectorAll<HTMLButtonElement>('.empty .empty-actions button')];
+    expect(actions.map((b) => b.textContent?.trim())).toEqual(['Add web page', 'Add repository']);
+    actions[0]!.click();
+    await settle(fixture);
+    expect(el.querySelector('app-web-source-dialog form')).not.toBeNull();
+  });
+
+  it('shows a web source by its name and the host of its page', async () => {
+    const web = repo(5, 'web/UniFi Network', {
+      provider: 'web',
+      host: 'ui.com',
+      fullName: 'ui.com/web/unifi network',
+      url: 'https://ui.com/download/releases/network-server',
+      avatarUrl: null,
+      lastSeenTag: '9.5.21',
+      lastSeenUrl: 'https://ui.com/download/releases/network-server',
+      webSource: {
+        url: 'https://ui.com/download/releases/network-server',
+        format: 'text',
+        items: null,
+        version: null,
+        date: null,
+        link: null,
+        userAgent: null,
+      },
+      versionPattern: 'UniFi Network Application (\\d+\\.\\d+\\.\\d+)',
+    });
+    const { el, fixture } = await render([web]);
+    const row = el.querySelector('.row')!;
+    const name = row.querySelector<HTMLAnchorElement>('a.name')!;
+    expect(name.textContent?.trim()).toBe('UniFi Network');
+    expect(name.getAttribute('href')).toBe('https://ui.com/download/releases/network-server');
+    expect(row.textContent).not.toContain('/web/');
+    expect(row.querySelector('.web-badge')?.textContent).toContain('ui.com');
+    expect(row.querySelector('.meta a.mono')?.getAttribute('href')).toBe('https://ui.com/download/releases/network-server');
+    expect(row.querySelector('button[aria-label="Settings of UniFi Network"]')).not.toBeNull();
+
+    // The search finds it by its display name.
+    const search = el.querySelector<HTMLInputElement>('#search')!;
+    search.value = 'unifi net';
+    search.dispatchEvent(new Event('input'));
+    await settle(fixture);
+    expect(el.querySelectorAll('.row').length).toBe(1);
+  });
+
+  it('adds a web page from its own dialog', async () => {
+    const { el, fixture } = await render([repo(1, 'zeta/zulu')]);
+    expect(el.querySelector('app-web-source-dialog form')).toBeNull();
+    headerButton(el, 'Add web page').click();
+    await settle(fixture);
+    const dialog = el.querySelector('app-web-source-dialog')!;
+    expect(dialog.querySelector('h2')?.textContent).toContain('Watch a web page');
+
+    const type = async (id: string, value: string) => {
+      const input = dialog.querySelector<HTMLInputElement>(`#${id}`)!;
       input.value = value;
       input.dispatchEvent(new Event('input'));
       await settle(fixture);
     };
-
-    await type('https://codeberg.org/forgejo/forgejo');
-    expect(el.querySelector('#new-provider')).toBeNull();
-    await type('https://git.example.com/me/app');
-    const select = el.querySelector<HTMLSelectElement>('#new-provider')!;
-    expect(select).not.toBeNull();
-    select.value = 'gitlab';
-    select.dispatchEvent(new Event('change'));
+    await type('new-web-name', 'TrueNAS');
+    await type('new-web-url', 'https://www.truenas.com/docs/softwarereleases/');
+    await type('new-web-version', 'dt a.gdoc-props__title');
+    dialog.querySelector('form')!.dispatchEvent(new Event('submit'));
     await settle(fixture);
 
-    el.querySelector<HTMLFormElement>('form.add-card')!.dispatchEvent(new Event('submit'));
-    await settle(fixture);
     const request = http.expectOne({ method: 'POST', url: '/api/repositories' });
-    expect(request.request.body).toEqual({ repository: 'https://git.example.com/me/app', includePrereleases: false, provider: 'gitlab' });
-    request.flush(repo(3, 'me/app', { provider: 'gitlab', host: 'git.example.com', fullName: 'git.example.com/me/app', avatarUrl: null }));
+    expect(request.request.body.name).toBe('TrueNAS');
+    request.flush(
+      repo(2, 'web/TrueNAS', {
+        provider: 'web',
+        host: 'www.truenas.com',
+        fullName: 'www.truenas.com/web/truenas',
+        avatarUrl: null,
+        webSource: { ...request.request.body.webSource },
+      }),
+    );
     await settle(fixture);
     http.match('/api/status').forEach((r) => r.flush({}));
 
-    expect(el.querySelector('.row')?.textContent).toContain('git.example.com/me/app');
-    expect(el.querySelector('#new-provider')).toBeNull();
+    expect(el.querySelector('app-web-source-dialog form')).toBeNull();
+    expect([...el.querySelectorAll('.row a.name')].map((a) => a.textContent?.trim())).toEqual(['TrueNAS', 'zeta/zulu']);
   });
 
   it('switches to the grid layout', async () => {

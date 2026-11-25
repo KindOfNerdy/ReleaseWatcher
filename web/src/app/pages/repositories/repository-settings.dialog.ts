@@ -45,12 +45,14 @@ import { OSV_ECOSYSTEMS } from '../../shared/severity';
 import { Switch } from '../../shared/switch';
 import { BackdropClose } from '../../shared/backdrop-close';
 import { UnsavedChanges, sameValues } from '../../shared/unsaved-changes';
+import { versionPatternError } from '../../shared/version-pattern';
+import { WebSourceDraft, WebSourceForm } from './web-source-form';
 
 /** Per-repository settings, including the URL of the installed (self-hosted) app's version endpoint. */
 @Component({
   selector: 'app-repository-settings-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [BackdropClose, FormsModule, Avatar, Icon, IconPickerDialog, Switch, UnsavedChanges],
+  imports: [BackdropClose, FormsModule, Avatar, Icon, IconPickerDialog, Switch, UnsavedChanges, WebSourceForm],
   templateUrl: './repository-settings.dialog.html',
   styleUrl: './repository-settings.dialog.scss',
 })
@@ -127,6 +129,9 @@ export class RepositorySettingsDialog {
   /** The form as opened, to tell whether it has unsaved changes. */
   private savedValues: unknown = null;
 
+  /** Page, format and pattern of a web source (provider `web`); unused for other repositories. */
+  protected readonly webDraft = signal(new WebSourceDraft());
+
   protected readonly saving = signal(false);
   protected readonly testing = signal(false);
   protected readonly testResult = signal<InstalledVersionTestResult | null>(null);
@@ -153,6 +158,7 @@ export class RepositorySettingsDialog {
       this.osvPackage,
       this.icon(),
       this.groupName(),
+      this.repository()?.webSource ? this.webDraft().values() : null,
     ];
   }
 
@@ -204,16 +210,7 @@ export class RepositorySettingsDialog {
 
   /** Why the version pattern can't be used (same checks as the server, which also limits its run time); null = fine. */
   protected patternError(): string | null {
-    const pattern = this.versionPattern.trim();
-    if (!pattern) {
-      return null;
-    }
-    try {
-      new RegExp(pattern, 'i');
-      return null;
-    } catch {
-      return 'This is not a valid regular expression.';
-    }
+    return versionPatternError(this.versionPattern);
   }
 
   /** Whether the form differs from the saved repository (read by the template on every check). */
@@ -248,6 +245,7 @@ export class RepositorySettingsDialog {
         this.picking.set(null);
         this.headers = repo.installedVersionHeaders.map((h) => ({ id: this.nextHeaderId++, name: h.name, value: '', saved: h.hasValue }));
         this.showValues.set(false);
+        this.webDraft.set(WebSourceDraft.of(repo));
         this.savedValues = untracked(() => this.values());
         this.testResult.set(null);
         this.testError.set(null);
@@ -353,20 +351,23 @@ export class RepositorySettingsDialog {
       this.saveError.set('Choose the app to read the installed version from.');
       return;
     }
-    if (this.patternError()) {
+    const web = repo.webSource ? this.webDraft() : null;
+    // The pattern of a web source is part of its form and checked by the server.
+    if (!web && this.patternError()) {
       this.saveError.set('Fix the version pattern first.');
       return;
     }
     this.saving.set(true);
     this.saveError.set(null);
+    web?.errors.set({});
     const hasOsv = !!this.osvEcosystem && !!this.osvPackage.trim();
     try {
       const updated = await firstValueFrom(
         this.api.updateRepository(repo.id, {
           includePrereleases: this.includePrereleases,
           isEnabled: this.isEnabled,
-          releaseSource: this.releaseSource,
-          versionPattern: this.versionPattern.trim() || null,
+          // Web sources have no releases or tags; their pattern comes with the page below.
+          ...(web ? {} : { releaseSource: this.releaseSource, versionPattern: this.versionPattern.trim() || null }),
           installedVersionUrl: fromUrl ? this.url.trim() || null : null,
           installedVersionField: fromUrl ? this.field.trim() || null : null,
           installedVersionHeaders: fromUrl ? this.headerInputs() : [],
@@ -385,11 +386,13 @@ export class RepositorySettingsDialog {
           osvPackage: hasOsv ? this.osvPackage.trim() : null,
           icon: this.icon().trim() || null,
           groupName: this.groupName().trim() || null,
+          // A web source sends its page and pattern; the server re-baselines silently when they change.
+          ...(web ? { name: web.name().trim(), webSource: web.webSource(), versionPattern: web.versionPattern() } : {}),
         }),
       );
       this.saved.emit(updated);
     } catch (error) {
-      this.saveError.set(describeError(error));
+      this.saveError.set(web ? web.fail(error) : describeError(error));
     } finally {
       this.saving.set(false);
     }
