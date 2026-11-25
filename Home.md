@@ -21,6 +21,7 @@ contributor rules live in [`AGENTS.md`](https://github.com/Rozumek29/ReleaseWatc
 | Install it | [[Installation]] → [[First steps]] |
 | Update ReleaseWatcher itself | [[Updating ReleaseWatcher]] |
 | Get a Discord, e-mail, ntfy, Telegram … message for new releases | [[Repositories]], [[Notifications]] |
+| Watch a project without releases (tags, a web page, an RSS feed) | [[Repositories]], [[Web pages and feeds]] |
 | See which vulnerabilities affect what I run | [[Vulnerabilities]] |
 | Keep Proxmox containers, VMs and servers updated | [[Connections and SSH]] → [[Machines]] → [[Applications and updates]] |
 | Track Home Assistant OS updates | [[Home Assistant OS]] |
@@ -37,6 +38,8 @@ contributor rules live in [`AGENTS.md`](https://github.com/Rozumek29/ReleaseWatc
 **GitHub releases**
 
 - Watches any public or private repository; pre-releases are opt-in per repository.
+- Projects without releases: their **tags** (newest by version, with an optional version pattern like `^TS-(.+)$`), or a
+  **web page, RSS/Atom feed or JSON API**.
 - Knows the **installed version** of your instance (read from a URL like `/api/version`, or entered by hand), so it
   shows *Update available 1.34.1 → 1.34.3* and does not announce releases you already run.
 - Custom **icons** (an image URL or a [selfh.st/icons](https://selfh.st/icons/) name like `sh:frigate`).

@@ -10,6 +10,7 @@
 **Releases**
 
 - [[Repositories]]
+- [[Web pages and feeds]]
 - [[Vulnerabilities]]
 - [[Notifications]]
 

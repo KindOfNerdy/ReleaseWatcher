@@ -1,7 +1,9 @@
 # Repositories
 
 The **Repositories** page lists the repositories you watch for new releases – on **GitHub**, **Gitea/Forgejo**
-(Codeberg, code.forgejo.org, gitea.com, self-hosted) or **GitLab** (gitlab.com, self-managed).
+(Codeberg, code.forgejo.org, gitea.com, self-hosted) or **GitLab** (gitlab.com, self-managed) – and versions read from
+[[web pages and feeds|Web pages and feeds]]. A repository that only tags its versions can be watched by its
+[tags](#releases-or-tags).
 
 ## Adding a repository
 
@@ -34,6 +36,9 @@ What happens next:
    moves forward **after each one** – a crash never causes duplicates.
 4. Drafts are ignored; pre-releases only if switched on for the repository.
 
+The **newest** release is the one published last. With [tags](#releases-or-tags) it is the **highest version** instead
+(tags have no reliable dates), and every version above the baseline is new.
+
 After every check – scheduled, at start, *Check all now* or of a single repository – ReleaseWatcher also checks every
 enabled machine with an application whose latest version comes from a repository and differs from its newest release, so
 *Update available* shows up there right away ([[Applications and updates]]).
@@ -52,6 +57,47 @@ enabled machine with an application whose latest version comes from a repository
 ### Pre-releases and pause
 
 *Pre-releases* includes GitHub pre-releases (betas, RCs). A **paused** repository is not checked and not notified.
+
+### Releases or tags
+
+**Watch** chooses what is read:
+
+| Watch | Newest is | Use for |
+| --- | --- | --- |
+| **Releases** (default) | the release published last | projects that publish releases |
+| **Tags** | the highest version | projects that only tag versions, e.g. Checkmk (`v2.5.0p21`) or TrueNAS (`TS-25.10.8`) |
+
+With tags:
+
+- Tags that are no version (`nightly`, `latest`) are skipped, and tags of the same version (`v2.5.0p21`,
+  `v2.5.0p21+security`) count once.
+- A tag is a pre-release when its name says so (`-rc.1`, `-beta`, `-alpha` …), e.g. `v2.5.0p21-rc1+security`.
+- Patch levels right after the numbers count as one more number: `2.5.0p21` (Checkmk) is newer than `2.5.0p20` and
+  `2.5.0`; `9.10.2-U5` (TrueNAS) is newer than `9.10.2-U2`. `p`, `u` and `patch` are recognised, with or without a
+  `-`, `_` or `.` before them.
+- GitHub returns tags without dates; a notification shows the time of the check instead.
+- The latest tag links to its page (GitHub `…/releases/tag/<tag>`, Gitea/Forgejo `…/src/tag/<tag>`, GitLab
+  `…/-/tags/<tag>`).
+
+Changing *Watch* or the *Version pattern* makes the next check store a new baseline **without notifying** – releases and
+tags (or versions before and after a new pattern) can't be compared.
+
+### Version pattern
+
+An optional **regular expression** (case-insensitive) a tag must match – everything else is skipped:
+
+- **Releases:** only filters, e.g. `^v\d` ignores releases of other components in a monorepo.
+- **Tags:** also picks the version that is shown and compared – the named group `version` (`(?<version>…)`), else
+  group 1, else the whole match. The link still uses the real tag name.
+
+| Project | Tags | Pattern | Newest (no pre-releases) |
+| --- | --- | --- | --- |
+| TrueNAS (`truenas/middleware`) | `TrueNAS-9.10.2-U5`, `TS-27.0.0-RC.1`, `TS-26.0.0-BETA.3`, `TS-25.10.8` … | `^TS-(.+)$` | `25.10.8` |
+| Checkmk (`Checkmk/checkmk`) | `v2.5.0`, `v2.5.0p21`, `v2.5.0p21+security`, `v2.5.0p20` | – | `v2.5.0p21` |
+
+Without the pattern, TrueNAS' old `TrueNAS-9.10.2-U5` tags would be compared with the new `TS-…` ones. A pattern may be at
+most 500 characters long; one that runs longer than **2 seconds** (e.g. nested repetition like `(a+)+`) is stopped and
+shown as the repository's error.
 
 ### Installed version
 
@@ -126,6 +172,7 @@ See [[Vulnerabilities]].
 
 ## Related
 
+- [[Web pages and feeds]] – versions from a web page, an RSS/Atom feed or a JSON API.
 - [[Notifications]] – what is sent and how.
 - [[Docker containers]] – containers can link themselves to a repository through labels.
 - [[REST API]] – `/api/repositories`.

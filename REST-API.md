@@ -45,19 +45,30 @@ already have.
 | Method | Route | Description |
 | --- | --- | --- |
 | `GET` | `/api/repositories` | List watched repositories |
-| `POST` | `/api/repositories` | `{ "repository": "owner/repo", "provider"?: "gitea" \| "gitlab", "includePrereleases": false, "accessToken"?: "github_pat_…" }` – `repository` is `owner/repo` (GitHub) or the HTTPS URL of a GitHub, Gitea/Forgejo or GitLab repository; `provider` only for a host that isn't well known (detected when omitted); `accessToken` is the repository's own token on any host (responses: `hasAccessToken`, `accessTokenMasked`). Responses carry `provider` (`github`/`gitea`/`gitlab`), `host` (null on GitHub), `fullName` (`host/owner/name` outside GitHub), `url` and `avatarUrl` (null for GitLab) |
-| `PUT` | `/api/repositories/:id` | `{ "includePrereleases", "isEnabled", "installedVersionUrl"?, "installedVersionField"?, "installedVersionHeaders"?: [{ "name", "value" }], "installedVersion"?, "accessToken"?, "osvEcosystem"?, "osvPackage"?, "icon"? }` – a header with `value: null` keeps the saved value; `installedVersion` only without a URL (`400` otherwise). Response has `installedVersionSource` (`none`/`url`/`manual`) and `iconUrls` |
+| `POST` | `/api/repositories` | `{ "repository": "owner/repo", "provider"?: "gitea" \| "gitlab", "includePrereleases": false, "releaseSource"?: "releases" \| "tags", "versionPattern"?: "^TS-(.+)$", "accessToken"?: "github_pat_…" }` – `repository` is `owner/repo` (GitHub) or the HTTPS URL of a GitHub, Gitea/Forgejo or GitLab repository; `provider` only for a host that isn't well known (detected when omitted); `accessToken` is the repository's own token on any host (responses: `hasAccessToken`, `accessTokenMasked`). Responses carry `provider` (`github`/`gitea`/`gitlab`/`web`), `host` (null on GitHub), `fullName` (`host/owner/name` outside GitHub), `url`, `avatarUrl` (null for GitLab), `releaseSource`, `versionPattern` and `webSource` (null outside web sources). An invalid `versionPattern` → `400` with `errors.versionPattern`. **Web source:** `{ "name": "TrueNAS", "webSource": WebSource, "versionPattern"?, "includePrereleases"? }` – see below |
+| `PUT` | `/api/repositories/:id` | `{ "includePrereleases", "isEnabled", "releaseSource"?, "versionPattern"?, "name"?, "webSource"?, "installedVersionUrl"?, "installedVersionField"?, "installedVersionHeaders"?: [{ "name", "value" }], "installedVersion"?, "accessToken"?, "osvEcosystem"?, "osvPackage"?, "icon"? }` – a header with `value: null` keeps the saved value; `installedVersion` only without a URL (`400` otherwise); `releaseSource` `null` = releases, `versionPattern` `null` = none – changing either makes the next check set a new baseline without notifying; `name` and `webSource` only for web sources (a new URL, locator or pattern re-baselines too, the User-Agent alone does not). Response has `installedVersionSource` (`none`/`url`/`manual`) and `iconUrls` |
 | `POST` | `/api/repositories/:id/mark-installed` | Set the hand-entered installed version to the latest release (`409` with a URL or before the first release is known) |
 | `DELETE` | `/api/repositories/:id` | Stop watching |
 | `POST` | `/api/repositories/:id/check` | Check now (incl. advisories); also checks machines whose linked app is behind the newest release (`containerChecks`) |
 | `GET` | `/api/repositories/:id/advisories` | Vulnerabilities of the repository with `source`, `affectsInstalled` (`true`/`false`/`null`), `affectedVersions` |
 | `GET` | `/api/advisories` | One page of all vulnerabilities. Query: `impact` (`all`/`affecting`/`unknown`/`unaffected`), `severity`, `source`, `q`, `limit` (1–200, default 50), `cursor`. Returns `{ items, nextCursor, total, overview }` (`total`/`overview` on the first page only) |
+| `POST` | `/api/web-sources/preview` | `{ "webSource": WebSource, "versionPattern"?, "includePrereleases"? }` → `{ contentType, detectedFormat, bytes, order, releases: [{ version, title, publishedAt, url, isPrerelease }], newest }` – at most 50 releases, nothing saved; `400` for an invalid source or pattern, `502` when the URL can't be read |
 | `POST` | `/api/installed-version/test` | `{ "url", "field": null, "headers": [], "repositoryId"? }` → detected version and response preview |
 | `POST` | `/api/check-all` | Check all active repositories now |
 | `GET` | `/api/notifiers` | Notifiers (`discord`, `email`, `ntfy`, `gotify`, `telegram`, `slack`, `pushover`, `webhook`) and whether they are configured |
 | `POST` | `/api/notifiers/test` | Test all enabled notifiers, or `{ "notifier": "telegram" }` (`409` when not configured) |
 | `GET` | `/api/settings` | Effective settings (secrets masked) and where each value comes from |
 | `PUT` | `/api/settings` | Partial update; omitted = keep, `null` = reset to the environment value |
+
+**Releases and tags:** `releaseSource` is `releases` (newest by date) or `tags` (newest by version); `versionPattern` is
+a case-insensitive regular expression (max 500 characters) tags must match – with tags its group `version` or group 1
+is the version. See [[Repositories]].
+
+**Web sources** ([[Web pages and feeds]]) have `provider: "web"`, `host` = the host of the URL, `owner: "web"` and
+`name` = the display name; no advisories, token or tags. `WebSource` =
+`{ "url", "format": "text" | "json" | "html" | "xml", "items", "version", "date", "link", "userAgent" }` – `url`
+and `format` are required, the locators and `userAgent` may be `null`. Every repository has `webSource` (`null` outside
+web sources). `order` of a preview is `date` or `version`; `detectedFormat` is what the response looks like.
 
 The settings of ntfy, Gotify, Telegram, Slack, Pushover and the webhook come as `channels.<name>` =
 `{ configured, settings: { <key>: { value, secret, configured, source } } }`; for a secret `value` is only a masked hint
