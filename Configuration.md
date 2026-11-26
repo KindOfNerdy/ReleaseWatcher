@@ -37,6 +37,7 @@ never wait for the schedule.
 | Settings tab → section | Variables |
 | --- | --- |
 | General → GitHub | `GITHUB_TOKEN` |
+| General → Gitea/Forgejo and GitLab hosts | UI only (one access token per instance, see [[Repositories]]) |
 | General → Check schedules | `RELEASE_CHECK_CRON`, `ADVISORY_CHECK_CRON`, `DOCKER_CHECK_CRON` |
 | General → Vulnerability sources | UI only (GitHub advisories, OSV.dev – both on by default) |
 | General → Containers | `CONTAINER_CHECK_CRON`, `CONTAINER_CHECK_CONCURRENCY`, `BACKUP_BEFORE_UPDATE`, run history (UI only) |

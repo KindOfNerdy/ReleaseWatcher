@@ -82,6 +82,17 @@ replaced with `webhookHeaders: [{ name, value }]` (`value: null` keeps the saved
 | `GET` | `/api/version` | `{ "version": "1.5.0" }` (public) |
 | `GET` | `/health` | Liveness (public) |
 
+## Host tokens (Gitea/Forgejo, GitLab)
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/api/git-host-tokens` | Tokens per instance: `provider` (`gitea` \| `gitlab`), `host`, `tokenMasked`, `repositoryCount` (repositories without an own token that use it) – never the token |
+| `POST` | `/api/git-host-tokens` | Add `{ provider, host, token }` (`201`; `409` when the host already has a token of that provider) |
+| `PUT` | `/api/git-host-tokens/:id` | Change `{ provider?, host?, token? }` – omitted = keep |
+| `DELETE` | `/api/git-host-tokens/:id` | Remove (`204`) |
+
+A repository on a Gitea/Forgejo or GitLab host without its own `accessToken` is read with the token of its host.
+
 ## SSH keys and hosts
 
 | Method | Route | Description |

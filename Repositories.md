@@ -19,8 +19,8 @@ Paste the HTTPS URL of the repository (or `host/owner/repo`), e.g. `https://code
 - **Which software?** github.com, gitlab.com, codeberg.org, gitea.com and code.forgejo.org are known. For another host
   ReleaseWatcher tries Gitea/Forgejo first, then GitLab – or pick one in the select that appears next to the URL.
 - **Tokens:** a private repository needs a token of *that* instance (Gitea/Forgejo: *Settings → Applications → Access
-  tokens*, repository read; GitLab: *Access tokens* with `read_api`). The global GitHub token is never sent to other
-  hosts.
+  tokens*, repository read; GitLab: *Access tokens* with `read_api`) – either on the repository, or once for the whole
+  host (see [Host tokens](#host-tokens)). The global GitHub token is never sent to other hosts.
 - **Pre-releases:** Gitea/Forgejo mark them like GitHub. GitLab has no such flag, so a release counts as a pre-release
   when its tag says so (`-rc.1`, `-beta`, `-alpha` …) or it is scheduled for later.
 - **Vulnerabilities:** only GitHub publishes security advisories per repository – for the others set the
@@ -176,6 +176,16 @@ repository. Tokens are encrypted at rest and shown only masked; **Remove it** de
 | Classic | `repo` (private) or none (public only) |
 
 The remaining quota is shown in Settings (`GET /api/github/rate-limit`).
+
+### Host tokens
+
+For a self-hosted Gitea/Forgejo or GitLab with several private repositories, save **one token per host** in
+**Settings → General → Gitea/Forgejo and GitLab hosts** (provider + host, e.g. `git.example.com` or
+`git.example.com:3000`). Every repository on that host (and provider) without a token of its own is read with it – also
+a repository added from a Docker image label suggestion – and rotating the token is a single change. A token set on the
+repository takes precedence. A host token is sent only to its own host, never to GitHub or another instance. Tokens are
+encrypted at rest, shown only masked, and not included in a backup from *Settings → Backup* (listed as omitted
+secrets).
 
 ### Vulnerabilities from OSV.dev
 
