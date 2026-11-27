@@ -44,10 +44,14 @@ export interface HomeAssistantComponent {
   releaseUrl: string | null;
   /** Repository named by the entity as its lower-case `fullName()`. */
   repository: string;
+  /** When the entity was last read; null = before this was stored. */
+  lastSeenAt: string | null;
+  /** The watched repository with that name – a component is linked to it without any setting; null = not watched. */
+  repositoryId: number | null;
 }
 
 /** A component as read from the states, before it is stored. */
-export type ReadComponent = Omit<HomeAssistantComponent, 'id' | 'connectionId'>;
+export type ReadComponent = Omit<HomeAssistantComponent, 'id' | 'connectionId' | 'lastSeenAt' | 'repositoryId'>;
 
 /** Longest name accepted for a connection. */
 export const MAX_NAME_LENGTH = 100;
