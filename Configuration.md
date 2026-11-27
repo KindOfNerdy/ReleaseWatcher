@@ -38,10 +38,10 @@ never wait for the schedule.
 | --- | --- |
 | General → GitHub | `GITHUB_TOKEN` |
 | General → Gitea/Forgejo and GitLab hosts | UI only (one access token per instance, see [[Repositories]]) |
-| General → Check schedules | `RELEASE_CHECK_CRON`, `ADVISORY_CHECK_CRON`, `DOCKER_CHECK_CRON` |
+| General → Check schedules | `RELEASE_CHECK_CRON`, `ADVISORY_CHECK_CRON`, `DOCKER_CHECK_CRON`, `HOME_ASSISTANT_CHECK_CRON` |
 | General → Vulnerability sources | UI only (GitHub advisories, OSV.dev – both on by default) |
 | General → Containers | `CONTAINER_CHECK_CRON`, `CONTAINER_CHECK_CONCURRENCY`, `BACKUP_BEFORE_UPDATE`, run history (UI only) |
-| Connections | SSH keys, hosts, Docker endpoints (UI only; `PROXMOX_*` seed the first host) |
+| Connections | SSH keys, hosts, Docker endpoints, Home Assistant connections (UI only; `PROXMOX_*` seed the first host) |
 | Notifications → Discord | `DISCORD_WEBHOOK_URL`, `DISCORD_MENTION`, `DISCORD_USERNAME` |
 | Notifications → E-mail | `SMTP_*`, `EMAIL_FROM`, `EMAIL_TO` |
 | Notifications → More channels | `NTFY_*`, `GOTIFY_*`, `TELEGRAM_*`, `SLACK_WEBHOOK_URL`, `PUSHOVER_*`, `WEBHOOK_URL` |
@@ -85,6 +85,7 @@ See [[Notifications]].
 | `RELEASE_CHECK_CRON` | `*/15 * * * *` | New releases. |
 | `ADVISORY_CHECK_CRON` | `0 */6 * * *` | Vulnerabilities (security advisories). |
 | `DOCKER_CHECK_CRON` | `0 */6 * * *` | Docker endpoints and registry checks. |
+| `HOME_ASSISTANT_CHECK_CRON` | `0 */6 * * *` | Update entities of the [[Home Assistant]] connections. |
 | `POLL_INTERVAL_MINUTES` | – | Deprecated; used only without `RELEASE_CHECK_CRON` (converted, e.g. `15` → `*/15 * * * *`). |
 | `POLL_INITIAL_DELAY_SECONDS` | `10` | Delay before the first release check after start. |
 

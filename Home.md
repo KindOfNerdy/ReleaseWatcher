@@ -26,6 +26,7 @@ contributor rules live in [`AGENTS.md`](https://github.com/Rozumek29/ReleaseWatc
 | Keep Proxmox containers, VMs and servers updated | [[Connections and SSH]] → [[Machines]] → [[Applications and updates]] |
 | Track Home Assistant OS updates | [[Home Assistant OS]] |
 | Track Docker / Podman containers | [[Docker containers]] |
+| See what is installed in Home Assistant (any installation) | [[Home Assistant]] |
 | Change colours and theme | [[Appearance]] |
 | Set up passkeys, single sign-on or a token for Homepage | [[Account and security]], [[API tokens]] |
 | Script against it | [[REST API]] |

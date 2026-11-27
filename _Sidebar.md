@@ -21,6 +21,7 @@
 - [[Applications and updates]]
 - [[Home Assistant OS]]
 - [[Docker containers]]
+- [[Home Assistant]]
 
 **App**
 

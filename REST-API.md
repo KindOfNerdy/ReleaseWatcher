@@ -150,6 +150,19 @@ A repository on a Gitea/Forgejo or GitLab host without its own `accessToken` is 
 | `POST` | `/api/docker/endpoints/:id/check` | Check one endpoint → `202` (`409` while checked) |
 | `PUT` | `/api/docker/containers/:id` | `{ "ignored"?, "linkAuto"?, "repositoryId"? }` |
 
+
+## Home Assistant
+
+| Method | Route | Description |
+| --- | --- | --- |
+| `GET` | `/api/home-assistant` | `{ connections, components, check }` – components with `connectionId`, `entityId`, `name`, `installedVersion`, `latestVersion` (what Home Assistant knows), `releaseUrl`, `repositoryName`, `versionComparable` (false for a commit hash), `homeAssistantUpdate` (Home Assistant reports an update) |
+| `POST` | `/api/home-assistant/check` | Read every enabled connection now → `202` |
+| `GET` | `/api/home-assistant/connections` | Connections (`tokenMasked`, never the token) |
+| `POST` | `/api/home-assistant/connections` | `{ "name", "url", "token" }` → `201`, starts a check |
+| `POST` | `/api/home-assistant/connections/test` | `{ "url", "token"?, "id"? }` → `{ components }` (nothing saved; `id` uses the saved token of that connection for its saved address; `502` when unreadable) |
+| `PUT` / `DELETE` | `/api/home-assistant/connections/:id` | `{ "name", "url", "token"?, "isEnabled"? }` – no `token` keeps the saved one, a new `url` needs it again / remove with its components |
+| `POST` | `/api/home-assistant/connections/:id/check` | Read one connection → `202` (`409` while it is read) |
+
 ## Authentication
 
 API tokens cannot call any `/api/auth/*` route (`403`).
