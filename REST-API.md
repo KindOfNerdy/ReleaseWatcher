@@ -155,7 +155,7 @@ A repository on a Gitea/Forgejo or GitLab host without its own `accessToken` is 
 
 | Method | Route | Description |
 | --- | --- | --- |
-| `GET` | `/api/home-assistant` | `{ connections, components, check }` – components with `connectionId`, `entityId`, `name`, `installedVersion`, `latestVersion` (what Home Assistant knows), `releaseUrl`, `repositoryName`, `versionComparable` (false for a commit hash), `homeAssistantUpdate` (Home Assistant reports an update) |
+| `GET` | `/api/home-assistant` | `{ connections, components, check }` – components with `connectionId`, `entityId`, `name`, `installedVersion`, `latestVersion` (what Home Assistant knows), `releaseUrl`, `repositoryName`, `lastSeenAt`, `versionComparable` (false for a commit hash), `homeAssistantUpdate` (Home Assistant reports an update), `repository` (the watched repository it names, or `null`), `suggestedRepository`, `updateAvailable` (newer release of the watched repository; `null` when not watched or not comparable) |
 | `POST` | `/api/home-assistant/check` | Read every enabled connection now → `202` |
 | `GET` | `/api/home-assistant/connections` | Connections (`tokenMasked`, never the token) |
 | `POST` | `/api/home-assistant/connections` | `{ "name", "url", "token" }` → `201`, starts a check |

@@ -1,7 +1,8 @@
 # Home Assistant
 
 ReleaseWatcher reads what is installed in a **Home Assistant** instance – Core, integrations, cards and other
-components whose update entity names a repository – and shows it on the **Home Assistant** page.
+components whose update entity names a repository – shows it on the **Home Assistant** page and uses it as the
+installed version of the repositories you watch.
 **It is read-only: nothing is installed or changed in Home Assistant.**
 
 It works with any installation (Home Assistant OS, Container, Supervised, Core) because it only needs the address and
@@ -43,15 +44,38 @@ Left out:
   release of that repository),
 - release notes pages and gists.
 
+## Repository link
+
+A component belongs to the repository its update entity names – there is nothing to set:
+
+- When that repository is **watched**, the component is linked to it. It shows *Update available* for newer releases
+  of the repository, and its installed version counts for the repository's [[Vulnerabilities]].
+- When it is not watched yet, **Watch** adds it to the watch list. Nothing is added on its own – use the filter
+  **Not watched** to go through the suggestions.
+
+### Installed version of the repository
+
+A watched repository reads its **installed version** from the component: after every check, and when you add the
+repository, the version Home Assistant reports is taken over – unless the repository already has a version URL or
+reads its version from an app on a machine or a Docker container. In the repository's settings the component is
+listed under *Installed version from*, where you can stop or choose it again.
+
+- A commit hash is never taken over (it cannot be compared with releases).
+- When the component disappears, its connection is removed or the entity names another repository, the repository
+  keeps the last version as entered by hand and says why.
+
 ## What you see per component
 
-- **Installed version** and, when Home Assistant reports an update, the version it offers.
-- **Update available** opens the release Home Assistant links to; **Up to date** otherwise.
+- **Installed version** and, when there is a newer one, the version an update would bring: the latest release of the
+  watched repository, otherwise the version Home Assistant knows of.
+- **Update available** – for a repository that is not watched it opens the release Home Assistant links to;
+  **Up to date** otherwise.
 - **Commit** – the installed version is a commit hash (a repository without releases). It is shown, but cannot be
   compared with releases.
 
-The filter **Updates** shows only components with an update. When a connection cannot be read, its error is shown and
-the components read before are kept.
+Filters: **Updates**, **Not watched**, and a search over component and repository names. The sidebar shows the number
+of components with an update. When a connection cannot be read, its error is shown and the components read before are
+kept.
 
 ## Backup
 
