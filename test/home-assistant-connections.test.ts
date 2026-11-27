@@ -445,4 +445,12 @@ describe('Home Assistant connections: API', () => {
     assert.equal(chosen.body.installedVersionApp.kind, 'home-assistant');
   });
 
+  it('counts components and updates in the status summary', async () => {
+    await watch('custom-cards/button-card');
+    await addConnection();
+    const status = (await request('GET', '/api/status')).body;
+    // Button Card: newer release of the watched repository and a newer version in Home Assistant – counted once.
+    assert.deepEqual(status.homeAssistant, { total: 3, updatesAvailable: 1 });
+  });
+
 });

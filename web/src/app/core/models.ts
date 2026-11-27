@@ -569,6 +569,11 @@ export interface AppStatus {
     total: number;
     updatesAvailable: number;
   };
+  /** Home Assistant components read and those with a newer release or a newer version known to Home Assistant. */
+  homeAssistant?: {
+    total: number;
+    updatesAvailable: number;
+  };
   /** Security advisories of all repositories; `affecting` = those affecting an installed version. */
   advisories?: {
     total: number;

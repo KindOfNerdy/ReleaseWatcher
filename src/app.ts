@@ -876,6 +876,18 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   };
 
   /** Docker counts of the status summary – derived only from the database, so rebuilt only after a write. */
+  /** Home Assistant counts of the status summary – derived only from the database, like the Docker ones. */
+  const homeAssistantStatus = cachedByRevision(
+    () => store.revision(),
+    () => {
+      const components = homeAssistant.describe(homeAssistantStore.listComponents());
+      return {
+        total: components.length,
+        /** A newer release of the watched repository, or a newer version known to Home Assistant. */
+        updatesAvailable: components.filter((c) => c.updateAvailable === true || c.homeAssistantUpdate).length,
+      };
+    },
+  );
   const dockerStatus = cachedByRevision(
     () => store.revision(),
     () => {
@@ -902,6 +914,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       },
       targets: containerStatus(containerStore),
       docker: dockerStatus(),
+      homeAssistant: homeAssistantStatus(),
       advisories: (() => {
         impacts.refresh();
         return store.advisoryTotals();
