@@ -66,6 +66,8 @@ export class HomeAssistantPage {
   /** Component whose installation is being confirmed, and whether a backup is asked for. */
   protected readonly confirming = signal<number | null>(null);
   protected readonly backupFirst = signal(true);
+  /** Component ids Home Assistant is checking right now. */
+  protected readonly refreshing = signal<ReadonlySet<number>>(new Set());
   /** Connection whose restart is being confirmed. */
   protected readonly confirmingRestart = signal<number | null>(null);
   /** Component ids whose repository is being added to the watch list. */
@@ -188,6 +190,39 @@ export class HomeAssistantPage {
       }
     } catch (error) {
       this.toast.error(error);
+    }
+  }
+
+  /**
+   * A watched repository has a newer release, but Home Assistant has not reported it yet. Offered with installing
+   * switched on only: HACS lets administrators alone refresh a repository, and the point is to install it next.
+   */
+  protected canRefresh(c: HomeAssistantComponent, connection: HomeAssistantConnection): boolean {
+    return connection.installEnabled && c.updateAvailable === true && !c.homeAssistantUpdate && !c.isInstalling;
+  }
+
+  /** Asks Home Assistant to look for the new version now (it checks on its own schedule otherwise). */
+  protected async refresh(c: HomeAssistantComponent): Promise<void> {
+    this.refreshing.update((s) => new Set(s).add(c.id));
+    try {
+      const updated = await firstValueFrom(this.api.refreshHomeAssistantComponent(c.id));
+      const data = this.overview();
+      if (data) {
+        this.overview.set({ ...data, components: data.components.map((x) => (x.id === updated.id ? updated : x)) });
+      }
+      if (updated.homeAssistantUpdate) {
+        this.toast.success(`Home Assistant now offers ${updated.latestVersion}.`);
+      } else {
+        this.toast.info(`Home Assistant has no update for ${c.name} yet – it may need a while to see the new release.`);
+      }
+    } catch (error) {
+      this.toast.error(error);
+    } finally {
+      this.refreshing.update((s) => {
+        const next = new Set(s);
+        next.delete(c.id);
+        return next;
+      });
     }
   }
 

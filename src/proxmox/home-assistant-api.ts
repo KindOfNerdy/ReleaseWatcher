@@ -73,6 +73,14 @@ export class HomeAssistantApi {
     await this.request('POST', '/api/services/update/install', { entity_id: entityId, ...(backup ? { backup: true } : {}) }, timeoutMs);
   }
 
+  /**
+   * Asks Home Assistant to update an entity now (`homeassistant.update_entity`) – for an update entity: to look for a
+   * new version before its own schedule. Any user allowed to control the entity may do this.
+   */
+  async updateEntity(entityId: string, timeoutMs: number): Promise<void> {
+    await this.request('POST', '/api/services/homeassistant/update_entity', { entity_id: entityId }, timeoutMs);
+  }
+
   /** Calls `homeassistant.restart`. Home Assistant may cut the connection while it goes down – that is not an error. */
   async restart(timeoutMs: number): Promise<void> {
     try {

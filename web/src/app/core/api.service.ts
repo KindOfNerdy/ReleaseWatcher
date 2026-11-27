@@ -351,6 +351,11 @@ export class ApiService {
     return this.http.post<HomeAssistantComponent>(`${this.baseUrl}/home-assistant/components/${id}/install`, { backup });
   }
 
+  /** Asks Home Assistant to look for a new version of a component now; returns the component as read afterwards. */
+  refreshHomeAssistantComponent(id: number): Observable<HomeAssistantComponent> {
+    return this.http.post<HomeAssistantComponent>(`${this.baseUrl}/home-assistant/components/${id}/refresh`, {});
+  }
+
   /** Restarts Home Assistant (only with installing switched on for the connection). */
   restartHomeAssistant(id: number): Observable<HomeAssistantConnection> {
     return this.http.post<HomeAssistantConnection>(`${this.baseUrl}/home-assistant/connections/${id}/restart`, {});

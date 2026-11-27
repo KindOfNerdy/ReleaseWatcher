@@ -188,6 +188,24 @@ export function homeAssistantRoutes(deps: HomeAssistantRoutesDeps) {
         return Response.json(view, { status: 202 });
       },
     },
+    // Asks Home Assistant to look for a new version of the component now, then reads the connection again.
+    '/api/home-assistant/components/:id/refresh': {
+      POST: async (req: Bun.BunRequest<'/api/home-assistant/components/:id/refresh'>) => {
+        const component = store.getComponent(parseId(req.params.id));
+        const connection = component ? store.getConnection(component.connectionId) : null;
+        if (!component || !connection) return problem(404, 'Home Assistant component not found.');
+        try {
+          await service.refresh(connection, component);
+        } catch (error) {
+          if (error instanceof ConnectionBusyError || error instanceof InstallBlockedError) return problem(409, error.message);
+          return problem(502, 'Home Assistant could not check the component.', { detail: errorMessage(error) });
+        }
+        const updated = store.getComponent(component.id);
+        if (!updated) return problem(404, 'Home Assistant no longer has this component.');
+        const [view] = service.describe([updated]);
+        return Response.json(view);
+      },
+    },
     // Restarts Home Assistant (only with installing switched on for the connection).
     '/api/home-assistant/connections/:id/restart': {
       POST: (req: Bun.BunRequest<'/api/home-assistant/connections/:id/restart'>) => {

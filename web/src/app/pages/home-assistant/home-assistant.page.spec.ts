@@ -104,6 +104,7 @@ describe('HomeAssistantPage', () => {
     const [card, core] = rows(el);
     // The repository's release, not the version Home Assistant knows.
     expect(card!.textContent).toContain('v7.1.0');
+    // Watched already; nothing to install yet, and installing is switched off – so no button.
     expect(card!.querySelector('button')).toBeNull();
     expect(core!.querySelector('button')?.textContent).toContain('Watch');
 
@@ -177,6 +178,23 @@ describe('HomeAssistantPage', () => {
   it('offers no restart while installing is switched off', async () => {
     const { el } = await create(haOverview());
     expect(el.querySelector('button[aria-label="Restart Home"]')).toBeNull();
+  });
+
+  it('asks Home Assistant to look for a release it has not reported yet', async () => {
+    const behind = haComponent({
+      repository: { id: 7, fullName: 'custom-cards/button-card', url: 'https://github.com/custom-cards/button-card', latestVersion: 'v7.2.0', iconUrls: [] },
+      suggestedRepository: null,
+      updateAvailable: true,
+      homeAssistantUpdate: false,
+      installBlocker: null,
+    });
+    const { fixture, el } = await create(haOverview({ connections: [haConnection({ installEnabled: true })], components: [behind] }));
+    const button = [...rows(el)[0]!.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes('Check in Home Assistant'))!;
+    expect(rows(el)[0]!.textContent).not.toContain('Install');
+    button.click();
+    http.expectOne({ method: 'POST', url: '/api/home-assistant/components/1/refresh' }).flush({ ...behind, homeAssistantUpdate: true, latestVersion: 'v7.2.0' });
+    await settle(fixture);
+    expect([...rows(el)[0]!.querySelectorAll('button')].some((b) => b.textContent?.includes('Install'))).toBe(true);
   });
 
 });

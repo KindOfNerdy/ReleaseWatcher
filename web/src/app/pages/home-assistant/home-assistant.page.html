@@ -183,6 +183,17 @@
                 <button type="button" class="btn btn-sm" (click)="install(c)">Yes</button>
                 <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
               </span>
+            } @else if (canRefresh(c, card.connection)) {
+              <button
+                type="button"
+                class="btn btn-sm btn-secondary"
+                (click)="refresh(c)"
+                [disabled]="refreshing().has(c.id)"
+                title="Home Assistant has not reported this release yet – ask it (or HACS) to look now"
+              >
+                <app-icon name="refresh" [size]="14" [class.spin]="refreshing().has(c.id)" />
+                {{ refreshing().has(c.id) ? 'Checking…' : 'Check in Home Assistant' }}
+              </button>
             } @else if (canInstall(c)) {
               <button type="button" class="btn btn-sm" (click)="askInstall(c)" [title]="'Install ' + c.latestVersion + ' in Home Assistant'">
                 <app-icon name="download" [size]="14" /> Install

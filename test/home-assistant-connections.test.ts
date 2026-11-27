@@ -93,6 +93,53 @@ describe('Home Assistant connections: API', () => {
   /** Restart calls the fake Home Assistant got, and how many reads of all states fail after one. */
   let restarts: number;
   let statesDown: number;
+  /** Entities Home Assistant was asked to update, and the version it then finds. */
+  let refreshed: string[];
+  let newerInHomeAssistant: string | null;
+  /** Entities that belong to HACS (entity id → HACS repository id), and the repositories HACS was asked to refresh. */
+  let hacsEntities: Map<string, string>;
+  let hacsRefreshed: string[];
+  let hacsRefused: boolean;
+  let hacsCommands: string[];
+
+  /** The WebSocket API of the fake Home Assistant: authentication, the entity registry and HACS. */
+  const fakeSocket = (url: string) => {
+    socketUrls.push(url);
+    const socket = {
+      onopen: null as ((e: unknown) => void) | null,
+      onmessage: null as ((e: { data: unknown }) => void) | null,
+      onerror: null as ((e: unknown) => void) | null,
+      onclose: null as ((e: unknown) => void) | null,
+      reply(message: object) {
+        setTimeout(() => socket.onmessage?.({ data: JSON.stringify(message) }));
+      },
+      send(data: string) {
+        const m = JSON.parse(data) as { id?: number; type: string; access_token?: string; entity_id?: string; repository?: string };
+        if (m.type === 'auth') return socket.reply({ type: m.access_token === TOKEN ? 'auth_ok' : 'auth_invalid' });
+        if (m.type === 'config/entity_registry/get') {
+          const repository = hacsEntities.get(m.entity_id ?? '');
+          const platform = repository ? (m.entity_id === 'update.hacs_style_update' ? 'hacs' : 'marketplace') : 'demo';
+          return socket.reply({ id: m.id, type: 'result', success: true, result: { platform, unique_id: repository ?? m.entity_id } });
+        }
+        if (m.type === 'marketplace/repository/refresh' || m.type === 'hacs/repository/refresh') {
+          hacsCommands.push(m.type);
+          if (hacsRefused) return socket.reply({ id: m.id, type: 'result', success: false, error: { code: 'unauthorized', message: 'Unauthorized' } });
+          hacsRefreshed.push(m.repository ?? '');
+          const entityId = [...hacsEntities].find(([, repo]) => repo === m.repository)?.[0];
+          const entity = (states as { entity_id: string; state: string; attributes: Record<string, unknown> }[]).find((e) => e.entity_id === entityId);
+          if (entity && newerInHomeAssistant) {
+            entity.state = 'on';
+            entity.attributes['latest_version'] = newerInHomeAssistant;
+          }
+          return socket.reply({ id: m.id, type: 'result', success: true, result: {} });
+        }
+      },
+      close() {},
+    };
+    socket.reply({ type: 'auth_required' });
+    return socket;
+  };
+  let socketUrls: string[];
 
   const requestedUrls = () => requests.map((r) => r.url);
 
@@ -112,6 +159,17 @@ describe('Home Assistant connections: API', () => {
       if (entity) {
         entity.state = 'off';
         entity.attributes['installed_version'] = entity.attributes['latest_version'];
+      }
+      return Response.json([]);
+    }
+    if (path === '/api/services/homeassistant/update_entity') {
+      const body = JSON.parse(String(init?.body)) as { entity_id: string };
+      refreshed.push(body.entity_id);
+      if (installFailure) return installFailure;
+      const entity = entities.find((e) => e.entity_id === body.entity_id);
+      if (entity && newerInHomeAssistant) {
+        entity.state = 'on';
+        entity.attributes['latest_version'] = newerInHomeAssistant;
       }
       return Response.json([]);
     }
@@ -167,6 +225,13 @@ describe('Home Assistant connections: API', () => {
     unreachable = 0;
     restarts = 0;
     statesDown = 0;
+    refreshed = [];
+    newerInHomeAssistant = null;
+    hacsEntities = new Map();
+    hacsRefreshed = [];
+    hacsRefused = false;
+    hacsCommands = [];
+    socketUrls = [];
     states = [
       update('update.button_card_update', {
         title: 'Button Card',
@@ -185,7 +250,7 @@ describe('Home Assistant connections: API', () => {
     ];
     store = new RepositoryStore(':memory:');
     source = new FakeSource();
-    source.existing.add('custom-cards/button-card').add('owner/some-integration').add('other/repo');
+    source.existing.add('custom-cards/button-card').add('owner/some-integration').add('other/repo').add('owner/old-card');
     source.releases = [release('v7.0.1', 2), release('v7.0.0', 1)];
     app = await buildApp({
       store,
@@ -195,6 +260,7 @@ describe('Home Assistant connections: API', () => {
       log: silentLogger,
       auth: { requireAuth: false },
       homeAssistantFetch: fakeHomeAssistant,
+      homeAssistantSocket: fakeSocket,
       homeAssistantPollMs: 1,
     });
     baseUrl = app.listen({ port: 0, hostname: '127.0.0.1' }).url;
@@ -627,6 +693,67 @@ describe('Home Assistant connections: API', () => {
     await request('POST', path);
     await app.homeAssistant.idle();
     assert.match((await request('GET', '/api/home-assistant/connections')).body[0].lastError, /refused to restart/);
+  });
+
+  it('asks Home Assistant to look for a new version of a component', async () => {
+    source.releases = [release('v7.2.0', 4), release('v7.0.1', 2)];
+    states = [update('update.button_card_update', { title: 'Button Card', installed_version: 'v7.0.1', latest_version: 'v7.0.1', release_url: 'https://github.com/custom-cards/button-card/releases/tag/v7.0.1' })];
+    await watch('custom-cards/button-card');
+    await addConnection({ installEnabled: true });
+    const before = await component('Button Card');
+    // A newer release, but Home Assistant has not seen it yet: nothing to install.
+    assert.equal(before.updateAvailable, true);
+    assert.equal(before.homeAssistantUpdate, false);
+    assert.match(before.installBlocker ?? 'no update', /no update/);
+
+    newerInHomeAssistant = 'v7.2.0';
+    const refreshedView = await request('POST', `/api/home-assistant/components/${before.id}/refresh`);
+    assert.equal(refreshedView.status, 200);
+    assert.deepEqual(refreshed, ['update.button_card_update']);
+    assert.equal(refreshedView.body.homeAssistantUpdate, true);
+    assert.equal(refreshedView.body.latestVersion, 'v7.2.0');
+    assert.equal(refreshedView.body.installBlocker, null);
+
+    installFailure = new Response('Unauthorized', { status: 500 });
+    assert.equal((await request('POST', `/api/home-assistant/components/${before.id}/refresh`)).status, 502);
+  });
+
+  it('refreshes a marketplace entry there, as "Update information" does', async () => {
+    source.releases = [release('v7.2.0', 4), release('v7.0.1', 2)];
+    states = [update('update.button_card_update', { title: 'Button Card', installed_version: 'v7.0.1', latest_version: 'v7.0.1', release_url: 'https://github.com/custom-cards/button-card/releases/tag/v7.0.1' })];
+    hacsEntities.set('update.button_card_update', '146194325');
+    await watch('custom-cards/button-card');
+    const { body: connection } = await addConnection();
+    const card = await component('Button Card');
+    const path = `/api/home-assistant/components/${card.id}/refresh`;
+    // Only with installing switched on (HACS allows it to administrators only).
+    assert.equal((await request('POST', path)).status, 409);
+    await request('PUT', `/api/home-assistant/connections/${connection.id}`, { name: 'Home', url: HA_URL, installEnabled: true });
+
+    newerInHomeAssistant = 'v7.2.0';
+    const refreshedView = await request('POST', path);
+    assert.equal(refreshedView.status, 200);
+    assert.deepEqual(hacsRefreshed, ['146194325']);
+    assert.deepEqual(hacsCommands, ['marketplace/repository/refresh']);
+    assert.deepEqual(refreshed, []); // not through update_entity
+    assert.equal(socketUrls[0], 'ws://ha.test:8123/api/websocket');
+    assert.equal(refreshedView.body.homeAssistantUpdate, true);
+    assert.equal(refreshedView.body.installBlocker, null);
+
+    hacsRefused = true;
+    const refused = await request('POST', path);
+    assert.equal(refused.status, 502);
+    assert.match(refused.body.detail, /administrator rights/);
+  });
+
+  it('refreshes an entry of the HACS custom integration through HACS', async () => {
+    states = [update('update.hacs_style_update', { title: 'Old card', installed_version: '1.0.0', latest_version: '1.0.0', release_url: 'https://github.com/owner/old-card/releases/tag/1.0.0' })];
+    hacsEntities.set('update.hacs_style_update', '42');
+    source.releases = [release('1.1.0', 3)];
+    await watch('owner/old-card');
+    await addConnection({ installEnabled: true });
+    assert.equal((await request('POST', `/api/home-assistant/components/${(await component('Old card')).id}/refresh`)).status, 200);
+    assert.deepEqual(hacsCommands, ['hacs/repository/refresh']);
   });
 
 });

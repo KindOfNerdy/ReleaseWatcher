@@ -76,6 +76,7 @@ import { GitHostTokenStore } from './git-host-tokens/store.ts';
 import { homeAssistantRoutes } from './home-assistant/routes.ts';
 import { HomeAssistantService } from './home-assistant/service.ts';
 import { HomeAssistantStore } from './home-assistant/store.ts';
+import type { SocketFactory } from './home-assistant/websocket.ts';
 import { hostRoutes } from './hosts/routes.ts';
 import type { DockerEngine } from './docker/engine.ts';
 import { OciRegistryClient, type RegistryClient } from './docker/registry.ts';
@@ -177,6 +178,8 @@ export interface AppDeps {
   fetchAppScript?: (slug: string) => Promise<string | null>;
   /** `fetch` for the Home Assistant REST API (tests pass a fake; defaults to the global `fetch`). */
   homeAssistantFetch?: (input: string, init?: RequestInit) => Promise<Response>;
+  /** WebSocket to Home Assistant connections (tests pass a fake – they must never reach a real Home Assistant). */
+  homeAssistantSocket?: SocketFactory;
   /** Pause between polls of Home Assistant during updates (tests use 0). */
   homeAssistantPollMs?: number;
   /** Wait after scheduling a machine reboot before polling it again, and the polling interval (tests use 0). */
@@ -713,6 +716,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     onLinked: (app, repositoryId) => machineApps.adopt(app, repositoryId),
     ...(deps.homeAssistantPollMs === undefined ? {} : { pollMs: deps.homeAssistantPollMs }),
     ...(deps.homeAssistantFetch === undefined ? {} : { fetch: deps.homeAssistantFetch }),
+    ...(deps.homeAssistantSocket === undefined ? {} : { socket: deps.homeAssistantSocket }),
   });
   const homeAssistantJob = new CronJob({
     name: 'home-assistant',

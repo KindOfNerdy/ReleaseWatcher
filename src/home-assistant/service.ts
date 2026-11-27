@@ -4,6 +4,7 @@ import { errorMessage } from '../errors.ts';
 import type { Logger } from '../log.ts';
 import { appUpdateAvailable } from '../proxmox/domain.ts';
 import { type FetchLike, HomeAssistantApi, HomeAssistantApiError } from '../proxmox/home-assistant-api.ts';
+import { refreshRepositoryEntity, type SocketFactory } from './websocket.ts';
 import {
   componentsFromStates,
   CORE_ENTITY_ID,
@@ -20,6 +21,8 @@ export interface HomeAssistantServiceDeps {
   log: Pick<Logger, 'info' | 'warn' | 'error'>;
   /** `fetch` for the Home Assistant API (tests pass a fake). */
   fetch?: FetchLike;
+  /** WebSocket to Home Assistant (tests pass a fake); defaults to the global `WebSocket`. */
+  socket?: SocketFactory;
   /** Watched repositories with what components are compared with (latest release, icon). */
   repositories?: () => readonly RepositoryLink[];
   /** A component names a watched repository and reports a version it can be compared by (`MachineApps.adopt`). */
@@ -45,6 +48,8 @@ export class ConnectionBusyError extends Error {
 /** Shown when Home Assistant refuses `update.install`: only administrators may install updates there. */
 export const ADMIN_NEEDED_MESSAGE =
   'Home Assistant refused to install the update – installing needs the access token of a user with administrator rights.';
+export const ADMIN_NEEDED_REFRESH_MESSAGE =
+  'Home Assistant refused to check for updates – the marketplace allows that to users with administrator rights only.';
 export const ADMIN_NEEDED_RESTART_MESSAGE =
   'Home Assistant refused to restart – that needs the access token of a user with administrator rights.';
 
@@ -234,6 +239,38 @@ export class HomeAssistantService {
     if (current) {
       await this.check(current);
     }
+  }
+
+  /**
+   * Asks Home Assistant to look for a new version of one component now, then reads the connection again – for a watched
+   * repository with a newer release Home Assistant has not seen yet. An entry of the marketplace (or HACS) is refreshed
+   * there (its *Update information*, admin only); any other entity through `homeassistant.update_entity`. Installs nothing.
+   */
+  async refresh(connection: HomeAssistantConnection, component: HomeAssistantComponent): Promise<void> {
+    if (!connection.installEnabled) {
+      throw new InstallBlockedError('Installing from ReleaseWatcher is switched off for this connection – check for updates in Home Assistant.');
+    }
+    if (this.busy.has(connection.id)) {
+      throw new ConnectionBusyError();
+    }
+    let done!: () => void;
+    this.busy.set(connection.id, new Promise<void>((resolve) => (done = resolve)));
+    try {
+      const timeoutMs = 120_000;
+      const viaStore = await refreshRepositoryEntity(connection, component.entityId, { timeoutMs, ...(this.deps.socket ? { socket: this.deps.socket } : {}) });
+      if (!viaStore) {
+        await new HomeAssistantApi(connection, this.deps.fetch).updateEntity(component.entityId, timeoutMs);
+      }
+    } catch (error) {
+      if (error instanceof HomeAssistantApiError && error.unauthorized) {
+        throw new HomeAssistantApiError(ADMIN_NEEDED_REFRESH_MESSAGE);
+      }
+      throw error;
+    } finally {
+      this.busy.delete(connection.id);
+      done();
+    }
+    await this.check(connection);
   }
 
   /**
