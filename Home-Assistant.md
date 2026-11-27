@@ -3,7 +3,7 @@
 ReleaseWatcher reads what is installed in a **Home Assistant** instance – Core, integrations, cards and other
 components whose update entity names a repository – shows it on the **Home Assistant** page and uses it as the
 installed version of the repositories you watch.
-**It is read-only: nothing is installed or changed in Home Assistant.**
+**It is read-only unless you switch installing on for a connection.**
 
 It works with any installation (Home Assistant OS, Container, Supervised, Core) because it only needs the address and
 a token. A Home Assistant OS virtual machine on a Proxmox node is covered by [[Home Assistant OS]] as well.
@@ -76,6 +76,24 @@ listed under *Installed version from*, where you can stop or choose it again.
 Filters: **Updates**, **Not watched**, and a search over component and repository names. The sidebar shows the number
 of components with an update. When a connection cannot be read, its error is shown and the components read before are
 kept.
+
+## Installing updates
+
+By default updates are **only read**. With **Install updates from ReleaseWatcher** switched on in a connection, an
+**Install** button appears next to every update Home Assistant offers:
+
+- It installs exactly the version Home Assistant offers (`update.install`) – ReleaseWatcher never picks one.
+- **Backup first** is offered where the entity supports it (e.g. Core and add-ons).
+- One update at a time per connection. Home Assistant Core restarts while it updates; ReleaseWatcher waits until it
+  answers again.
+- Custom integrations still need a **restart of Home Assistant** afterwards. ReleaseWatcher does not restart it by
+  itself; the **Restart** button of the connection does it when you ask for it and waits until Home Assistant answers
+  again.
+- Only what Home Assistant reports as an update can be installed – never a downgrade, e.g. from a newer pre-release.
+- When an installation fails, the reason stays next to the component until the next one works.
+
+> Home Assistant lets only administrators install updates and restart it. Reading works with any user, but for
+> installing and restarting the token must belong to a user **with** administrator rights.
 
 ## Backup
 

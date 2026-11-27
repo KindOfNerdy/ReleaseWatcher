@@ -155,13 +155,15 @@ A repository on a Gitea/Forgejo or GitLab host without its own `accessToken` is 
 
 | Method | Route | Description |
 | --- | --- | --- |
-| `GET` | `/api/home-assistant` | `{ connections, components, check }` – components with `connectionId`, `entityId`, `name`, `installedVersion`, `latestVersion` (what Home Assistant knows), `releaseUrl`, `repositoryName`, `lastSeenAt`, `versionComparable` (false for a commit hash), `homeAssistantUpdate` (Home Assistant reports an update), `repository` (the watched repository it names, or `null`), `suggestedRepository`, `updateAvailable` (newer release of the watched repository; `null` when not watched or not comparable) |
+| `GET` | `/api/home-assistant` | `{ connections, components, check }` – components with `connectionId`, `entityId`, `name`, `installedVersion`, `latestVersion` (what Home Assistant knows), `releaseUrl`, `repositoryName`, `lastSeenAt`, `versionComparable` (false for a commit hash), `homeAssistantUpdate` (Home Assistant reports an update), `repository` (the watched repository it names, or `null`), `suggestedRepository`, `updateAvailable` (newer release of the watched repository; `null` when not watched or not comparable), `supportsBackup`, `installBlocker` (why it cannot be installed from ReleaseWatcher, or `null`), `isInstalling`, `installError` |
 | `POST` | `/api/home-assistant/check` | Read every enabled connection now → `202` |
 | `GET` | `/api/home-assistant/connections` | Connections (`tokenMasked`, never the token) |
-| `POST` | `/api/home-assistant/connections` | `{ "name", "url", "token" }` → `201`, starts a check |
+| `POST` | `/api/home-assistant/connections` | `{ "name", "url", "token", "installEnabled"? }` → `201`, starts a check |
 | `POST` | `/api/home-assistant/connections/test` | `{ "url", "token"?, "id"? }` → `{ components }` (nothing saved; `id` uses the saved token of that connection for its saved address; `502` when unreadable) |
-| `PUT` / `DELETE` | `/api/home-assistant/connections/:id` | `{ "name", "url", "token"?, "isEnabled"? }` – no `token` keeps the saved one, a new `url` needs it again / remove with its components |
+| `PUT` / `DELETE` | `/api/home-assistant/connections/:id` | `{ "name", "url", "token"?, "isEnabled"?, "installEnabled"? }` – no `token` keeps the saved one, a new `url` needs it again / remove with its components |
 | `POST` | `/api/home-assistant/connections/:id/check` | Read one connection → `202` (`409` while it is read) |
+| `POST` | `/api/home-assistant/connections/:id/restart` | Restart Home Assistant and wait until it runs again → `202` (`409` with installing switched off or while busy) |
+| `POST` | `/api/home-assistant/components/:id/install` | `{ "backup"? }` – install the update Home Assistant offers → `202` (`409` with `installBlocker` set or while busy) |
 
 ## Authentication
 

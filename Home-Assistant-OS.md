@@ -28,7 +28,8 @@ how old it is.
 
 Updates are then read live from the REST API (`GET /api/states`). The token is stored encrypted and sent only from
 ReleaseWatcher to that URL – **never to the Proxmox node**. Home Assistant tokens cannot be limited to reading – create
-the token for a **user without administrator rights** to keep it small.
+the token for a **user without administrator rights** to keep it small, unless integration updates are installed from
+ReleaseWatcher: Home Assistant lets only administrators call `update.install`.
 
 ## Installing updates
 
