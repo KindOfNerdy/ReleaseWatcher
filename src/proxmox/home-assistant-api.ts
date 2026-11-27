@@ -30,9 +30,24 @@ export class HomeAssistantApi {
     this.fetch = fetchImpl;
   }
 
+  /**
+   * Whether Home Assistant has finished starting (`state` of `GET /api/config` is `RUNNING`). While it starts, the API
+   * already answers, but integrations – and with them most update entities – are not loaded yet. An answer without the
+   * field (older versions) counts as running.
+   */
+  async isRunning(): Promise<boolean> {
+    const config = (await this.request('GET', '/api/config')) as { state?: unknown } | null;
+    return typeof config?.state !== 'string' || config.state === 'RUNNING';
+  }
+
+  /** Every state as Home Assistant returns it (`GET /api/states`). */
+  async states(): Promise<unknown> {
+    return this.request('GET', '/api/states');
+  }
+
   /** Pending update entities, read live. */
   async pendingEntities(): Promise<UpdateEntity[]> {
-    return updateEntitiesFromStates(await this.request('GET', '/api/states'));
+    return updateEntitiesFromStates(await this.states());
   }
 
   /** State of one update entity: whether it is still pending or being installed, and the installed version. */
