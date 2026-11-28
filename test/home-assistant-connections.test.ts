@@ -116,6 +116,13 @@ describe('Home Assistant connections: API', () => {
       send(data: string) {
         const m = JSON.parse(data) as { id?: number; type: string; access_token?: string; entity_id?: string; repository?: string };
         if (m.type === 'auth') return socket.reply({ type: m.access_token === TOKEN ? 'auth_ok' : 'auth_invalid' });
+        if (m.type === 'config/entity_registry/list') {
+          return socket.reply({ id: m.id, type: 'result', success: true, result: addons.map((a) => ({ entity_id: a.entityId, platform: 'hassio', unique_id: `${a.slug}_version_latest` })) });
+        }
+        if (m.type === 'supervisor/api') {
+          if (!supervisor) return socket.reply({ id: m.id, type: 'result', success: false, error: { code: 'unknown_error', message: 'No Supervisor' } });
+          return socket.reply({ id: m.id, type: 'result', success: true, result: { addons: addons.map((a) => ({ slug: a.slug, url: a.url })) } });
+        }
         if (m.type === 'config/entity_registry/get') {
           const repository = hacsEntities.get(m.entity_id ?? '');
           const platform = repository ? (m.entity_id === 'update.hacs_style_update' ? 'hacs' : 'marketplace') : 'demo';
@@ -140,6 +147,9 @@ describe('Home Assistant connections: API', () => {
     return socket;
   };
   let socketUrls: string[];
+  /** Add-ons the fake Supervisor knows (none by default), and whether there is a Supervisor at all. */
+  let addons: { slug: string; entityId: string; url: string }[];
+  let supervisor: boolean;
 
   const requestedUrls = () => requests.map((r) => r.url);
 
@@ -232,6 +242,8 @@ describe('Home Assistant connections: API', () => {
     hacsRefused = false;
     hacsCommands = [];
     socketUrls = [];
+    addons = [];
+    supervisor = true;
     states = [
       update('update.button_card_update', {
         title: 'Button Card',
@@ -782,6 +794,29 @@ describe('Home Assistant connections: API', () => {
     await addConnection({ installEnabled: true });
     assert.equal((await request('POST', `/api/home-assistant/components/${(await component('Old card')).id}/refresh`)).status, 200);
     assert.deepEqual(hacsCommands, ['hacs/repository/refresh']);
+  });
+
+  it('reads the repository of an add-on from the Supervisor', async () => {
+    states = [
+      update('update.mosquitto_broker_update', { title: 'Mosquitto broker', installed_version: '7.1.3', latest_version: '7.1.3' }),
+      update('update.zigbee2mqtt_update', { title: 'Zigbee2MQTT', installed_version: '2.14.3-1', latest_version: '2.14.3-1' }),
+      update('update.music_assistant_update', { title: 'Music Assistant', installed_version: '2.10.13', latest_version: '2.10.14' }, 'on'),
+    ];
+    addons = [
+      { slug: 'core_mosquitto', entityId: 'update.mosquitto_broker_update', url: 'https://github.com/home-assistant/app-mosquitto' },
+      // A folder in a collection repository and a website: no repository of its own.
+      { slug: '45df7312_zigbee2mqtt', entityId: 'update.zigbee2mqtt_update', url: 'https://github.com/zigbee2mqtt/hassio-zigbee2mqtt/tree/master/zigbee2mqtt' },
+      { slug: 'd5369777_music_assistant', entityId: 'update.music_assistant_update', url: 'https://music-assistant.io' },
+    ];
+    await addConnection();
+    const components = (await request('GET', '/api/home-assistant')).body.components;
+    assert.deepEqual(components.map((c: Record<string, unknown>) => [c['name'], c['repositoryName'], c['releaseUrl']]), [['Mosquitto broker', 'home-assistant/app-mosquitto', null]]);
+
+    // Without a Supervisor (or without the right to ask it) the other entities are read as before.
+    supervisor = false;
+    await recheck();
+    assert.deepEqual((await request('GET', '/api/home-assistant')).body.components, []);
+    assert.equal((await request('GET', '/api/home-assistant')).body.connections[0].lastError, null);
   });
 
 });

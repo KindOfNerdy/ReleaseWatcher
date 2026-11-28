@@ -119,9 +119,11 @@ export function entityRepository(entityId: string, releaseUrl: string | null): s
 /**
  * Maps `GET /api/states` to the components: every update entity Home Assistant can install that names a repository,
  * whether an update is pending or not – one it only announces is about something running elsewhere (an integration
- * reporting the version of its server) and left out. Sorted by name.
+ * reporting the version of its server) and left out. `projectUrls` (entity id → URL) names the project of entities
+ * without a release link – add-ons, whose Supervisor knows it; only a repository's own address counts there, not a
+ * folder in a collection. Sorted by name.
  */
-export function componentsFromStates(states: unknown): ReadComponent[] {
+export function componentsFromStates(states: unknown, projectUrls: ReadonlyMap<string, string> = new Map()): ReadComponent[] {
   if (!Array.isArray(states)) {
     throw new Error('Home Assistant answered with something other than a list of states.');
   }
@@ -136,7 +138,8 @@ export function componentsFromStates(states: unknown): ReadComponent[] {
       unknown
     >;
     const releaseUrl = str(attributes['release_url']);
-    const repository = entityRepository(entityId, releaseUrl);
+    // Add-ons name no release; the Supervisor knows their project URL (see `projectUrls`).
+    const repository = entityRepository(entityId, releaseUrl) ?? entityRepository(entityId, projectUrls.get(entityId) ?? null);
     if (!repository) {
       continue;
     }

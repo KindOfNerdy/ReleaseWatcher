@@ -4,7 +4,7 @@ import { errorMessage } from '../errors.ts';
 import type { Logger } from '../log.ts';
 import { appUpdateAvailable } from '../proxmox/domain.ts';
 import { type FetchLike, HomeAssistantApi, HomeAssistantApiError } from '../proxmox/home-assistant-api.ts';
-import { refreshRepositoryEntity, type SocketFactory } from './websocket.ts';
+import { addonProjectUrls, refreshRepositoryEntity, type SocketFactory } from './websocket.ts';
 import {
   componentsFromStates,
   CORE_ENTITY_ID,
@@ -123,7 +123,9 @@ export class HomeAssistantService {
     if (!(await api.isRunning())) {
       throw new HomeAssistantApiError(STARTING_MESSAGE);
     }
-    return componentsFromStates(await api.states());
+    const states = await api.states();
+    const projectUrls = await addonProjectUrls(connection, { timeoutMs: 30_000, ...(this.deps.socket ? { socket: this.deps.socket } : {}) });
+    return componentsFromStates(states, projectUrls);
   }
 
   /**

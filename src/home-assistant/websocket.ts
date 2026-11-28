@@ -95,6 +95,48 @@ export function runCommands(
 }
 
 /**
+ * Project URLs of the add-ons (entity id of their update entity → URL), as the Supervisor knows them – add-on update
+ * entities name no release. Empty without a Supervisor (Container and Core installations) or when the token may not ask
+ * (the Supervisor API is for administrators only); this never fails a check.
+ */
+export async function addonProjectUrls(
+  connection: { url: string; token: string },
+  options: { timeoutMs: number; socket?: SocketFactory },
+): Promise<Map<string, string>> {
+  let registry: { entity_id?: unknown; platform?: unknown; unique_id?: unknown }[] = [];
+  try {
+    const result = await runCommands(
+      connection,
+      { type: 'config/entity_registry/list' },
+      (value, index) => {
+        if (index !== 1) return null;
+        registry = Array.isArray(value) ? value : [];
+        return { type: 'supervisor/api', endpoint: '/addons', method: 'get' };
+      },
+      options,
+    );
+    // The unique id of an add-on's update entity is `<slug>_version_latest`.
+    const bySlug = new Map<string, string>();
+    for (const entry of registry) {
+      const id = typeof entry.unique_id === 'string' ? entry.unique_id : '';
+      if (entry.platform === 'hassio' && typeof entry.entity_id === 'string' && id.endsWith('_version_latest')) {
+        bySlug.set(id.slice(0, -'_version_latest'.length), entry.entity_id);
+      }
+    }
+    const urls = new Map<string, string>();
+    for (const addon of ((result ?? {}) as { addons?: { slug?: unknown; url?: unknown }[] }).addons ?? []) {
+      const entityId = typeof addon.slug === 'string' ? bySlug.get(addon.slug) : undefined;
+      if (entityId && typeof addon.url === 'string' && addon.url.trim()) {
+        urls.set(entityId, addon.url.trim());
+      }
+    }
+    return urls;
+  } catch {
+    return new Map();
+  }
+}
+
+/**
  * Integrations whose update entities stand for a repository and the command that fetches its information again (what
  * *Update information* does): the marketplace built into Home Assistant and the custom integration HACS before it. The
  * unique id of such an update entity is the id of its repository. Both allow this to administrators only.
