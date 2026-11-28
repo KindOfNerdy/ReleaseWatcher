@@ -38,6 +38,7 @@ describe('Home Assistant connections: domain', () => {
         installed_version: 'v7.0.1',
         latest_version: 'v7.0.1',
         release_url: 'https://github.com/custom-cards/button-card/releases/tag/v7.0.1',
+        supported_features: 1 | 4 | 16,
       }),
       update(
         'update.addon_update',
@@ -45,8 +46,10 @@ describe('Home Assistant connections: domain', () => {
         'on',
       ),
       update('update.home_assistant_core_update', { title: 'Home Assistant Core', installed_version: '2026.11.3', latest_version: '2026.11.3' }),
-      // Left out: device firmware without a link, an entity of another domain, a broken entry.
+      // Left out: device firmware without a link, a server running elsewhere that Home Assistant only announces,
+      // an entity of another domain, a broken entry.
       update('update.plug_firmware', { title: 'Plug firmware', installed_version: '1.0', latest_version: '1.1', release_url: null }),
+      update('update.server_version', { title: 'Server', installed_version: '2.0', latest_version: '2.1', release_url: 'https://github.com/owner/server/releases/tag/v2.1', supported_features: 16 }),
       { entity_id: 'sensor.temperature', state: '21', attributes: { release_url: 'https://github.com/owner/repo' } },
       null,
     ]);
