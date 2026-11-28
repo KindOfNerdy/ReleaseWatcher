@@ -71,6 +71,7 @@ export function homeAssistantRoutes(deps: HomeAssistantRoutesDeps) {
     createdAt: c.createdAt,
     isChecking: service.isChecking(c.id),
     isRestarting: service.isRestarting(c.id),
+    pendingRestarts: service.pendingRestarts(c.id),
   });
 
   const overview = () => ({

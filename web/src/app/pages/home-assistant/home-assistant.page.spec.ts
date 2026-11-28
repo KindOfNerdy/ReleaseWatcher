@@ -62,6 +62,12 @@ describe('HomeAssistantPage', () => {
     expect(row!.textContent).not.toContain('Watch');
   });
 
+  it('says when Home Assistant waits for a restart', async () => {
+    const { el } = await create(haOverview({ connections: [haConnection({ pendingRestarts: ['Battery Notes'] })] }));
+    const badge = [...el.querySelectorAll('.source-actions .badge')].find((b) => b.textContent?.includes('Restart needed'));
+    expect(badge?.getAttribute('title')).toContain('Battery Notes');
+  });
+
   it('links repositories outside GitHub to their host', () => {
     expect(repositoryLink('owner/repo')).toBe('https://github.com/owner/repo');
     expect(repositoryLink('codeberg.org/owner/repo')).toBe('https://codeberg.org/owner/repo');

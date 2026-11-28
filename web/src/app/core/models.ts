@@ -1187,6 +1187,8 @@ export interface HomeAssistantConnection {
   isChecking: boolean;
   /** Home Assistant is restarting (asked for from here, or while Core updates). */
   isRestarting: boolean;
+  /** What waits for a restart of Home Assistant (installed integrations or cards, from its repair issues). */
+  pendingRestarts: string[];
 }
 
 /** An update entity of a connection that names a repository (Core, an add-on, an integration, a card …). */

@@ -193,3 +193,24 @@ export async function refreshRepositoryEntity(
   );
   return isStore;
 }
+
+/**
+ * Names of what waits for a restart of Home Assistant: the marketplace (or HACS) files a repair issue
+ * `restart_required` after installing an integration or card that is loaded only at start. Empty when none – or when the
+ * issues cannot be read; this never fails a check.
+ */
+export async function pendingRestarts(
+  connection: { url: string; token: string },
+  options: { timeoutMs: number; socket?: SocketFactory },
+): Promise<string[]> {
+  try {
+    const result = (await runCommands(connection, { type: 'repairs/list_issues' }, () => null, options)) as {
+      issues?: { domain?: unknown; translation_key?: unknown; ignored?: unknown; translation_placeholders?: { name?: unknown } | null }[];
+    } | null;
+    return (result?.issues ?? [])
+      .filter((i) => (i.domain === 'marketplace' || i.domain === 'hacs') && i.translation_key === 'restart_required' && i.ignored !== true)
+      .map((i) => (typeof i.translation_placeholders?.name === 'string' ? i.translation_placeholders.name : 'An integration'));
+  } catch {
+    return [];
+  }
+}

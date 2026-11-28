@@ -131,6 +131,9 @@ describe('Home Assistant connections: API', () => {
           }
           return socket.reply({ id: m.id, type: 'result', success: true, result: { addons: addons.map((a) => ({ slug: a.slug, url: a.url, repository: a.slug.split('_')[0] })) } });
         }
+        if (m.type === 'repairs/list_issues') {
+          return socket.reply({ id: m.id, type: 'result', success: true, result: { issues: repairIssues } });
+        }
         if (m.type === 'config/entity_registry/get') {
           const repository = hacsEntities.get(m.entity_id ?? '');
           const platform = repository ? (m.entity_id === 'update.hacs_style_update' ? 'hacs' : 'marketplace') : 'demo';
@@ -159,6 +162,8 @@ describe('Home Assistant connections: API', () => {
   let addons: { slug: string; entityId: string; url: string | null }[];
   /** Add-on stores of the Supervisor (`slug` = the part of an add-on's slug before `_`). */
   let stores: { slug: string; source: string; url: string | null }[];
+  /** Repair issues of the fake Home Assistant. */
+  let repairIssues: Record<string, unknown>[];
   let supervisor: boolean;
 
   const requestedUrls = () => requests.map((r) => r.url);
@@ -254,6 +259,7 @@ describe('Home Assistant connections: API', () => {
     socketUrls = [];
     addons = [];
     stores = [];
+    repairIssues = [];
     supervisor = true;
     states = [
       update('update.button_card_update', {
@@ -853,6 +859,24 @@ describe('Home Assistant connections: API', () => {
     await recheck();
     assert.deepEqual((await request('GET', '/api/home-assistant')).body.components, []);
     assert.equal((await request('GET', '/api/home-assistant')).body.connections[0].lastError, null);
+  });
+
+  it('says what waits for a restart of Home Assistant', async () => {
+    repairIssues = [
+      { domain: 'marketplace', issue_id: 'restart_required_1_v2', translation_key: 'restart_required', ignored: false, translation_placeholders: { name: 'Battery Notes' } },
+      { domain: 'hacs', issue_id: 'restart_required_2_v1', translation_key: 'restart_required', ignored: false, translation_placeholders: { name: 'Old Card' } },
+      // Other issues, and an ignored one, do not count.
+      { domain: 'waipu', issue_id: 'x', translation_key: 'missing_configured_entity', ignored: false },
+      { domain: 'marketplace', issue_id: 'restart_required_3_v1', translation_key: 'restart_required', ignored: true, translation_placeholders: { name: 'Ignored' } },
+    ];
+    await addConnection();
+    let [connection] = (await request('GET', '/api/home-assistant')).body.connections;
+    assert.deepEqual(connection.pendingRestarts, ['Battery Notes', 'Old Card']);
+
+    repairIssues = [];
+    await recheck();
+    [connection] = (await request('GET', '/api/home-assistant')).body.connections;
+    assert.deepEqual(connection.pendingRestarts, []);
   });
 
   it('links an add-on that names no repository by hand and keeps it across checks', async () => {

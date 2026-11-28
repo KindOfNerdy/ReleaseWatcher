@@ -89,6 +89,9 @@
           } @else if (card.connection.lastCheckedAt) {
             <span class="muted small">checked {{ card.connection.lastCheckedAt | relativeTime: now() }}</span>
           }
+          @if (card.connection.pendingRestarts.length > 0 && !card.connection.isRestarting && confirmingRestart() !== card.connection.id) {
+            <span class="badge badge-warning" [title]="'Waiting for a restart of Home Assistant: ' + card.connection.pendingRestarts.join(', ')">Restart needed</span>
+          }
           <button
             type="button"
             class="icon-btn"

@@ -4,7 +4,7 @@ import { errorMessage } from '../errors.ts';
 import type { Logger } from '../log.ts';
 import { appUpdateAvailable } from '../proxmox/domain.ts';
 import { type FetchLike, HomeAssistantApi, HomeAssistantApiError } from '../proxmox/home-assistant-api.ts';
-import { addonProjectUrls, refreshRepositoryEntity, type SocketFactory } from './websocket.ts';
+import { addonProjectUrls, pendingRestarts, refreshRepositoryEntity, type SocketFactory } from './websocket.ts';
 import {
   componentsFromStates,
   CORE_ENTITY_ID,
@@ -98,6 +98,8 @@ export class HomeAssistantService {
   private readonly installing = new Map<number, number>();
   /** Connections whose Home Assistant is restarting right now (asked for, or while Core updates). */
   private readonly restarting = new Set<number>();
+  /** What waits for a restart, by connection (read with every check; kept in memory). */
+  private readonly restartsNeeded = new Map<number, string[]>();
   private readonly pollMs: number;
 
   constructor(deps: HomeAssistantServiceDeps) {
@@ -108,6 +110,11 @@ export class HomeAssistantService {
 
   isRestarting(connectionId: number): boolean {
     return this.restarting.has(connectionId);
+  }
+
+  /** Names of what waits for a restart of the connection's Home Assistant (marketplace or HACS repair issues). */
+  pendingRestarts(connectionId: number): string[] {
+    return this.restartsNeeded.get(connectionId) ?? [];
   }
 
   isChecking(connectionId: number): boolean {
@@ -156,6 +163,10 @@ export class HomeAssistantService {
       // The connection may have been removed (or pointed elsewhere) while Home Assistant answered.
       if (store.getConnection(connection.id)?.url !== connection.url) return;
       store.replaceComponents(connection.id, components, this.now());
+      this.restartsNeeded.set(
+        connection.id,
+        await pendingRestarts(connection, { timeoutMs: 30_000, ...(this.deps.socket ? { socket: this.deps.socket } : {}) }),
+      );
       this.adopt(store.listComponents(connection.id));
       log.info({ connection: connection.name, components: components.length }, 'Read Home Assistant update entities');
     } catch (error) {
