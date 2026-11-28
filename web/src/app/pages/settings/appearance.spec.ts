@@ -66,6 +66,24 @@ describe('AppearancePanel', () => {
     expect(preferences.accent()).toBe('indigo');
   });
 
+  it('hides a page from the sidebar and shows it again', async () => {
+    const { fixture, el } = await render();
+    const navigation = TestBed.inject(NavigationService);
+    const toggle = (label: string) => el.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
+    // Settings cannot be hidden.
+    expect(toggle('Hide Settings')).toBeNull();
+
+    toggle('Hide Machines').click();
+    await settle(fixture);
+    expect(navigation.isHidden('machines')).toBe(true);
+    expect(toggle('Show Machines').getAttribute('aria-pressed')).toBe('true');
+    expect(toggle('Show Machines').closest('li')!.textContent).toContain('Hidden');
+
+    toggle('Show Machines').click();
+    await settle(fixture);
+    expect(navigation.isHidden('machines')).toBe(false);
+  });
+
   it('shows the sidebar order, starts rearranging and resets the order', async () => {
     const { fixture, el } = await render();
     const navigation = TestBed.inject(NavigationService);
