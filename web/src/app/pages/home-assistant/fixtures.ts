@@ -7,10 +7,12 @@ export const haConnection = (overrides: Partial<HomeAssistantConnection> = {}): 
   url: 'http://homeassistant.local:8123',
   tokenMasked: 'eyJh…k3Xw',
   isEnabled: true,
+  installEnabled: false,
   lastCheckedAt: '2026-01-01T00:00:00Z',
   lastError: null,
   createdAt: '2026-01-01T00:00:00Z',
   isChecking: false,
+  isRestarting: false,
   ...overrides,
 });
 
@@ -26,6 +28,10 @@ export const haComponent = (overrides: Partial<HomeAssistantComponent> = {}): Ho
   lastSeenAt: '2026-01-01T00:00:00Z',
   versionComparable: true,
   homeAssistantUpdate: true,
+  supportsBackup: false,
+  installBlocker: 'Installing from ReleaseWatcher is switched off for this connection – install it in Home Assistant.',
+  isInstalling: false,
+  installError: null,
   repository: null,
   suggestedRepository: 'custom-cards/button-card',
   updateAvailable: null,

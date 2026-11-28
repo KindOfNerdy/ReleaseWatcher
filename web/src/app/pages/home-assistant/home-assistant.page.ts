@@ -63,6 +63,11 @@ export class HomeAssistantPage {
   ];
   /** Search over component and repository names. */
   protected readonly query = signal('');
+  /** Component whose installation is being confirmed, and whether a backup is asked for. */
+  protected readonly confirming = signal<number | null>(null);
+  protected readonly backupFirst = signal(true);
+  /** Connection whose restart is being confirmed. */
+  protected readonly confirmingRestart = signal<number | null>(null);
   /** Component ids whose repository is being added to the watch list. */
   protected readonly watching = signal<ReadonlySet<number>>(new Set());
   protected readonly hasUpdate = hasUpdate;
@@ -94,7 +99,11 @@ export class HomeAssistantPage {
 
   /** Something is being read: reload until it finished. */
   private readonly checking = computed(
-    () => this.checkingAll() || !!this.overview()?.check.isRunning || !!this.overview()?.connections.some((c) => c.isChecking),
+    () =>
+      this.checkingAll() ||
+      !!this.overview()?.check.isRunning ||
+      !!this.overview()?.connections.some((c) => c.isChecking || c.isRestarting) ||
+      !!this.overview()?.components.some((c) => c.isInstalling),
   );
 
   constructor() {
@@ -155,6 +164,47 @@ export class HomeAssistantPage {
         next.delete(c.id);
         return next;
       });
+    }
+  }
+
+  /** A component whose pending update can be installed from here. */
+  protected canInstall(c: HomeAssistantComponent): boolean {
+    return c.homeAssistantUpdate && c.installBlocker === null && !c.isInstalling;
+  }
+
+  protected askInstall(c: HomeAssistantComponent): void {
+    this.backupFirst.set(c.supportsBackup);
+    this.confirming.set(c.id);
+  }
+
+  /** Installs the version Home Assistant offers; the page reloads until it finished. */
+  protected async install(c: HomeAssistantComponent): Promise<void> {
+    this.confirming.set(null);
+    try {
+      const started = await firstValueFrom(this.api.installHomeAssistantComponent(c.id, c.supportsBackup && this.backupFirst()));
+      const data = this.overview();
+      if (data) {
+        this.overview.set({ ...data, components: data.components.map((x) => (x.id === started.id ? started : x)) });
+      }
+    } catch (error) {
+      this.toast.error(error);
+    }
+  }
+
+  /** Restarts Home Assistant, e.g. to load an updated custom integration; the page reloads until it is back. */
+  protected async restart(connection: HomeAssistantConnection): Promise<void> {
+    this.confirmingRestart.set(null);
+    try {
+      this.replaceConnection(await firstValueFrom(this.api.restartHomeAssistant(connection.id)));
+    } catch (error) {
+      this.toast.error(error);
+    }
+  }
+
+  private replaceConnection(connection: HomeAssistantConnection): void {
+    const data = this.overview();
+    if (data) {
+      this.overview.set({ ...data, connections: data.connections.map((c) => (c.id === connection.id ? connection : c)) });
     }
   }
 

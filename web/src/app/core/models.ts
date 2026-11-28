@@ -1179,10 +1179,14 @@ export interface HomeAssistantConnection {
   /** The access token, masked – it is never returned in full. */
   tokenMasked: string;
   isEnabled: boolean;
+  /** Updates may be installed from ReleaseWatcher; off = they are only read. */
+  installEnabled: boolean;
   lastCheckedAt: string | null;
   lastError: string | null;
   createdAt: string;
   isChecking: boolean;
+  /** Home Assistant is restarting (asked for from here, or while Core updates). */
+  isRestarting: boolean;
 }
 
 /** An update entity of a connection that names a repository (Core, an add-on, an integration, a card …). */
@@ -1204,6 +1208,14 @@ export interface HomeAssistantComponent {
   versionComparable: boolean;
   /** Home Assistant knows a version other than the installed one. */
   homeAssistantUpdate: boolean;
+  /** The entity can make a backup before installing. */
+  supportsBackup: boolean;
+  /** Why that update cannot be installed from ReleaseWatcher; null = it can (or there is none). */
+  installBlocker: string | null;
+  /** The update is being installed right now. */
+  isInstalling: boolean;
+  /** Why the last installation from ReleaseWatcher failed. */
+  installError: string | null;
   /** The watched repository the component names; null = not watched. */
   repository: { id: number; fullName: string; url: string; latestVersion: string | null; iconUrls: string[] } | null;
   /** Repository the component names that is not watched yet (offered as "Watch"); null = already watched. */
@@ -1225,4 +1237,5 @@ export interface HomeAssistantConnectionRequest {
   url: string;
   token?: string | null;
   isEnabled?: boolean;
+  installEnabled?: boolean;
 }

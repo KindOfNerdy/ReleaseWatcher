@@ -904,6 +904,11 @@ export const MIGRATIONS: readonly string[] = [
             installed_version_error = 'The component was removed from Home Assistant, so its last version is kept as entered by hand.'
       WHERE installed_home_assistant_id = OLD.id;
    END;`,
+  // Installing updates through a Home Assistant connection is opt-in per connection. A component remembers whether its
+  // update entity can make a backup before installing and why the last installation failed.
+  `ALTER TABLE home_assistant_connections ADD COLUMN install_enabled INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE home_assistant_components ADD COLUMN supports_backup INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE home_assistant_components ADD COLUMN install_error TEXT;`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */

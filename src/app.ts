@@ -711,6 +711,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     log,
     repositories: () => dockerStore.listRepositoryLinks(),
     onLinked: (app, repositoryId) => machineApps.adopt(app, repositoryId),
+    ...(deps.homeAssistantPollMs === undefined ? {} : { pollMs: deps.homeAssistantPollMs }),
     ...(deps.homeAssistantFetch === undefined ? {} : { fetch: deps.homeAssistantFetch }),
   });
   const homeAssistantJob = new CronJob({

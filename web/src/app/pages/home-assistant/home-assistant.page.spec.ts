@@ -135,4 +135,48 @@ describe('HomeAssistantPage', () => {
     expect(el.querySelector('.empty')?.textContent).toContain('No component matches the search.');
   });
 
+  it('installs an update after a confirmation, with a backup where Home Assistant offers one', async () => {
+    const installable = haComponent({ installBlocker: null, supportsBackup: true });
+    const { fixture, el } = await create(haOverview({ components: [installable, ...haOverview().components.slice(1)] }));
+    const row = () => rows(el)[0]!;
+    const button = (text: string) => [...row().querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim().startsWith(text))!;
+    // The other rows have no update to install, or installing is switched off.
+    expect(rows(el)[1]!.textContent).not.toContain('Install');
+    button('Install').click();
+    await settle(fixture);
+    expect(row().textContent).toContain('Install v7.0.1 in Home Assistant?');
+    expect(row().querySelector<HTMLInputElement>('input[type=checkbox]')!.checked).toBe(true);
+    button('Yes').click();
+    const post = http.expectOne({ method: 'POST', url: '/api/home-assistant/components/1/install' });
+    expect(post.request.body).toEqual({ backup: true });
+    post.flush({ ...installable, isInstalling: true });
+    await settle(fixture);
+    expect(row().textContent).toContain('Installing v7.0.1…');
+    fixture.destroy();
+  });
+
+  it('shows why the last installation failed', async () => {
+    const failed = haComponent({ installBlocker: null, installError: 'Home Assistant answered 500: Update failed.' });
+    const { el } = await create(haOverview({ components: [failed] }));
+    expect(rows(el)[0]!.querySelector('.install-error')?.textContent).toContain('answered 500');
+  });
+
+  it('restarts Home Assistant after a confirmation when installing is switched on', async () => {
+    const { fixture, el } = await create(haOverview({ connections: [haConnection({ installEnabled: true })] }));
+    el.querySelector<HTMLButtonElement>('button[aria-label="Restart Home"]')!.click();
+    await settle(fixture);
+    const actions = el.querySelector('.source-actions')!;
+    expect(actions.textContent).toContain('Restart Home Assistant?');
+    [...actions.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'Yes')!.click();
+    http.expectOne({ method: 'POST', url: '/api/home-assistant/connections/1/restart' }).flush(haConnection({ installEnabled: true, isRestarting: true }));
+    await settle(fixture);
+    expect(el.querySelector('.source-actions')?.textContent).toContain('Home Assistant is restarting…');
+    fixture.destroy();
+  });
+
+  it('offers no restart while installing is switched off', async () => {
+    const { el } = await create(haOverview());
+    expect(el.querySelector('button[aria-label="Restart Home"]')).toBeNull();
+  });
+
 });
