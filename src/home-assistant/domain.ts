@@ -136,9 +136,10 @@ export function isWebsite(address: string): boolean {
 /**
  * Maps `GET /api/states` to the components: every update entity Home Assistant can install that names a repository,
  * whether an update is pending or not – one it only announces is about something running elsewhere (an integration
- * reporting the version of its server) and left out. `projectUrls` (entity id → URLs to try) names the project of entities without a release link – add-ons, whose
- * Supervisor knows it; only a repository's own address counts there, not a folder in a collection. An add-on that names
- * no repository is kept with an empty `repository`, so it can be linked to one by hand. Sorted by name.
+ * reporting the version of its server) and left out. `projectUrls` (entity id → URLs to try) names the project of
+ * entities without a release link – add-ons, whose Supervisor knows it; only a repository's own address counts there,
+ * not a folder in a collection. An add-on that names no repository is kept with an empty `repository`, so it can be
+ * linked to one by hand. Sorted by name.
  */
 export function componentsFromStates(states: unknown, projectUrls: ReadonlyMap<string, readonly string[]> = new Map()): ReadComponent[] {
   if (!Array.isArray(states)) {

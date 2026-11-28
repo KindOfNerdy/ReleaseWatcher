@@ -117,7 +117,12 @@ describe('Home Assistant connections: API', () => {
         const m = JSON.parse(data) as { id?: number; type: string; access_token?: string; entity_id?: string; repository?: string };
         if (m.type === 'auth') return socket.reply({ type: m.access_token === TOKEN ? 'auth_ok' : 'auth_invalid' });
         if (m.type === 'config/entity_registry/list') {
-          return socket.reply({ id: m.id, type: 'result', success: true, result: addons.map((a) => ({ entity_id: a.entityId, platform: 'hassio', unique_id: `${a.slug}_version_latest` })) });
+          // Each add-on also has a "latest version" sensor with the same unique id (domains differ), listed after it.
+          const entries = addons.flatMap((a) => [
+            { entity_id: a.entityId, platform: 'hassio', unique_id: `${a.slug}_version_latest` },
+            { entity_id: a.entityId.replace(/^update\./, 'sensor.').replace(/_update$/, '_latest_version'), platform: 'hassio', unique_id: `${a.slug}_version_latest` },
+          ]);
+          return socket.reply({ id: m.id, type: 'result', success: true, result: entries });
         }
         if (m.type === 'supervisor/api') {
           if (!supervisor) return socket.reply({ id: m.id, type: 'result', success: false, error: { code: 'unknown_error', message: 'No Supervisor' } });
@@ -812,6 +817,7 @@ describe('Home Assistant connections: API', () => {
       update('update.zigbee2mqtt_update', { title: 'Zigbee2MQTT', installed_version: '2.14.3-1', latest_version: '2.14.3-1' }),
       update('update.music_assistant_update', { title: 'Music Assistant', installed_version: '2.10.13', latest_version: '2.10.14' }, 'on'),
       update('update.esphome_update', { title: 'ESPHome Device Builder', installed_version: '2026.11.1', latest_version: '2026.11.1' }),
+      update('update.matter_server_update', { title: 'Matter Server', installed_version: '9.3.0', latest_version: '9.3.0' }),
     ];
     addons = [
       { slug: 'core_mosquitto', entityId: 'update.mosquitto_broker_update', url: 'https://github.com/home-assistant/app-mosquitto' },
@@ -820,6 +826,8 @@ describe('Home Assistant connections: API', () => {
       // Websites: the store's repository counts – unless the store points to another project.
       { slug: 'd5369777_music_assistant', entityId: 'update.music_assistant_update', url: 'https://music-assistant.io' },
       { slug: '5c53de3b_esphome', entityId: 'update.esphome_update', url: 'https://esphome.io/' },
+      // Several addresses: the first that is a repository counts.
+      { slug: 'core_matter_server', entityId: 'update.matter_server_update', url: 'https://github.com/home-assistant/addons/tree/master/matter_server https://github.com/home-assistant/app-matter-server' },
     ];
     stores = [
       { slug: '45df7312', source: 'https://github.com/zigbee2mqtt/hassio-zigbee2mqtt', url: 'https://github.com/zigbee2mqtt/hassio-zigbee2mqtt' },
@@ -832,8 +840,9 @@ describe('Home Assistant connections: API', () => {
       components.map((c: Record<string, unknown>) => [c['name'], c['repositoryName'], c['suggestedRepository']]),
       [
         ['ESPHome Device Builder', 'esphome/home-assistant-addon', 'esphome/home-assistant-addon'],
-        // Kept without a repository, to be linked by hand.
+        ['Matter Server', 'home-assistant/app-matter-server', 'home-assistant/app-matter-server'],
         ['Mosquitto broker', 'home-assistant/app-mosquitto', 'home-assistant/app-mosquitto'],
+        // Kept without a repository, to be linked by hand.
         ['Music Assistant', '', null],
         ['Zigbee2MQTT', '', null],
       ],

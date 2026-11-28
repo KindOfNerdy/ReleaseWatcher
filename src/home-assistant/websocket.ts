@@ -125,11 +125,11 @@ export async function addonProjectUrls(
       },
       options,
     );
-    // The unique id of an add-on's update entity is `<slug>_version_latest`.
+    // The unique id of an add-on's update entity is `<slug>_version_latest` – shared with its "latest version" sensor.
     const bySlug = new Map<string, string>();
     for (const entry of registry) {
       const id = typeof entry.unique_id === 'string' ? entry.unique_id : '';
-      if (entry.platform === 'hassio' && typeof entry.entity_id === 'string' && id.endsWith('_version_latest')) {
+      if (entry.platform === 'hassio' && typeof entry.entity_id === 'string' && entry.entity_id.startsWith('update.') && id.endsWith('_version_latest')) {
         bySlug.set(id.slice(0, -'_version_latest'.length), entry.entity_id);
       }
     }
@@ -143,10 +143,11 @@ export async function addonProjectUrls(
     for (const addon of addons) {
       const entityId = typeof addon.slug === 'string' ? bySlug.get(addon.slug) : undefined;
       if (!entityId) continue;
-      const own = text(addon.url);
+      // Some add-ons list several addresses, separated by spaces.
+      const own = text(addon.url)?.split(/\s+/) ?? [];
       const store = stores.get(text(addon.repository) ?? '');
-      const candidates = own ? [own] : [];
-      if (own && isWebsite(own) && store?.source && (!store.url || isWebsite(store.url))) {
+      const candidates = [...own];
+      if (own.length > 0 && own.every(isWebsite) && store?.source && (!store.url || isWebsite(store.url))) {
         candidates.push(store.source);
       }
       urls.set(entityId, candidates);
