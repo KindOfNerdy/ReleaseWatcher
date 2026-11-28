@@ -121,7 +121,10 @@ describe('Home Assistant connections: API', () => {
         }
         if (m.type === 'supervisor/api') {
           if (!supervisor) return socket.reply({ id: m.id, type: 'result', success: false, error: { code: 'unknown_error', message: 'No Supervisor' } });
-          return socket.reply({ id: m.id, type: 'result', success: true, result: { addons: addons.map((a) => ({ slug: a.slug, url: a.url })) } });
+          if ((m as { endpoint?: string }).endpoint === '/store/repositories') {
+            return socket.reply({ id: m.id, type: 'result', success: true, result: stores });
+          }
+          return socket.reply({ id: m.id, type: 'result', success: true, result: { addons: addons.map((a) => ({ slug: a.slug, url: a.url, repository: a.slug.split('_')[0] })) } });
         }
         if (m.type === 'config/entity_registry/get') {
           const repository = hacsEntities.get(m.entity_id ?? '');
@@ -148,7 +151,9 @@ describe('Home Assistant connections: API', () => {
   };
   let socketUrls: string[];
   /** Add-ons the fake Supervisor knows (none by default), and whether there is a Supervisor at all. */
-  let addons: { slug: string; entityId: string; url: string }[];
+  let addons: { slug: string; entityId: string; url: string | null }[];
+  /** Add-on stores of the Supervisor (`slug` = the part of an add-on's slug before `_`). */
+  let stores: { slug: string; source: string; url: string | null }[];
   let supervisor: boolean;
 
   const requestedUrls = () => requests.map((r) => r.url);
@@ -243,6 +248,7 @@ describe('Home Assistant connections: API', () => {
     hacsCommands = [];
     socketUrls = [];
     addons = [];
+    stores = [];
     supervisor = true;
     states = [
       update('update.button_card_update', {
@@ -545,7 +551,7 @@ describe('Home Assistant connections: API', () => {
     assert.match(dto.installedVersionError, /no longer names this repository/);
   });
 
-  it('lists components as installed-version sources and refuses one that names another repository', async () => {
+  it('lists components as installed-version sources and links one to another repository by hand', async () => {
     const repo = await watch('custom-cards/button-card');
     const other = await watch('other/repo');
     await addConnection();
@@ -561,15 +567,19 @@ describe('Home Assistant connections: API', () => {
         ['home-assistant', 'Some integration', null],
       ],
     );
-    const refused = await request('PUT', `/api/repositories/${other.id}`, { includePrereleases: false, isEnabled: true, installedVersionApp: { kind: 'home-assistant', id: card.id } });
-    assert.equal(refused.status, 400);
-
-    // Stopped and chosen again by hand in the repository's settings.
-    await request('PUT', `/api/repositories/${repo.id}`, { includePrereleases: false, isEnabled: true, installedVersionApp: null });
+    // Chosen for another repository: linked to that one instead, the first keeps its last version.
+    const moved = await request('PUT', `/api/repositories/${other.id}`, { includePrereleases: false, isEnabled: true, installedVersionApp: { kind: 'home-assistant', id: card.id } });
+    assert.equal(moved.status, 200);
+    assert.equal(moved.body.installedVersionApp.kind, 'home-assistant');
+    assert.equal((await component('Button Card')).repository.id, other.id);
     assert.equal((await repository(repo.id)).installedVersionApp, null);
-    const chosen = await request('PUT', `/api/repositories/${repo.id}`, { includePrereleases: false, isEnabled: true, installedVersionApp: { kind: 'home-assistant', id: card.id } });
-    assert.equal(chosen.status, 200);
-    assert.equal(chosen.body.installedVersionApp.kind, 'home-assistant');
+
+    // Chosen again for the repository it names: back to that one, and no longer a choice.
+    const back = await request('PUT', `/api/repositories/${repo.id}`, { includePrereleases: false, isEnabled: true, installedVersionApp: { kind: 'home-assistant', id: card.id } });
+    assert.equal(back.status, 200);
+    const card2 = await component('Button Card');
+    assert.equal(card2.repository.id, repo.id);
+    assert.equal(card2.repositoryChosen, false);
   });
 
   it('counts components and updates in the status summary', async () => {
@@ -801,16 +811,33 @@ describe('Home Assistant connections: API', () => {
       update('update.mosquitto_broker_update', { title: 'Mosquitto broker', installed_version: '7.1.3', latest_version: '7.1.3' }),
       update('update.zigbee2mqtt_update', { title: 'Zigbee2MQTT', installed_version: '2.14.3-1', latest_version: '2.14.3-1' }),
       update('update.music_assistant_update', { title: 'Music Assistant', installed_version: '2.10.13', latest_version: '2.10.14' }, 'on'),
+      update('update.esphome_update', { title: 'ESPHome Device Builder', installed_version: '2026.11.1', latest_version: '2026.11.1' }),
     ];
     addons = [
       { slug: 'core_mosquitto', entityId: 'update.mosquitto_broker_update', url: 'https://github.com/home-assistant/app-mosquitto' },
-      // A folder in a collection repository and a website: no repository of its own.
+      // A folder in a collection repository: no repository of its own.
       { slug: '45df7312_zigbee2mqtt', entityId: 'update.zigbee2mqtt_update', url: 'https://github.com/zigbee2mqtt/hassio-zigbee2mqtt/tree/master/zigbee2mqtt' },
+      // Websites: the store's repository counts – unless the store points to another project.
       { slug: 'd5369777_music_assistant', entityId: 'update.music_assistant_update', url: 'https://music-assistant.io' },
+      { slug: '5c53de3b_esphome', entityId: 'update.esphome_update', url: 'https://esphome.io/' },
+    ];
+    stores = [
+      { slug: '45df7312', source: 'https://github.com/zigbee2mqtt/hassio-zigbee2mqtt', url: 'https://github.com/zigbee2mqtt/hassio-zigbee2mqtt' },
+      { slug: 'd5369777', source: 'https://github.com/music-assistant/home-assistant-addon', url: 'https://github.com/music-assistant/core' },
+      { slug: '5c53de3b', source: 'https://github.com/esphome/home-assistant-addon', url: 'https://esphome.io' },
     ];
     await addConnection();
     const components = (await request('GET', '/api/home-assistant')).body.components;
-    assert.deepEqual(components.map((c: Record<string, unknown>) => [c['name'], c['repositoryName'], c['releaseUrl']]), [['Mosquitto broker', 'home-assistant/app-mosquitto', null]]);
+    assert.deepEqual(
+      components.map((c: Record<string, unknown>) => [c['name'], c['repositoryName'], c['suggestedRepository']]),
+      [
+        ['ESPHome Device Builder', 'esphome/home-assistant-addon', 'esphome/home-assistant-addon'],
+        // Kept without a repository, to be linked by hand.
+        ['Mosquitto broker', 'home-assistant/app-mosquitto', 'home-assistant/app-mosquitto'],
+        ['Music Assistant', '', null],
+        ['Zigbee2MQTT', '', null],
+      ],
+    );
 
     // Without a Supervisor (or without the right to ask it) the other entities are read as before.
     supervisor = false;
@@ -818,5 +845,27 @@ describe('Home Assistant connections: API', () => {
     assert.deepEqual((await request('GET', '/api/home-assistant')).body.components, []);
     assert.equal((await request('GET', '/api/home-assistant')).body.connections[0].lastError, null);
   });
+
+  it('links an add-on that names no repository by hand and keeps it across checks', async () => {
+    states = [update('update.music_assistant_update', { title: 'Music Assistant', installed_version: '2.10.13', latest_version: '2.10.14' }, 'on')];
+    addons = [{ slug: 'd5369777_music_assistant', entityId: 'update.music_assistant_update', url: 'https://music-assistant.io' }];
+    source.existing.add('music-assistant/server');
+    const repo = await watch('music-assistant/server');
+    await addConnection();
+    const addon = await component('Music Assistant');
+    const chosen = await request('PUT', `/api/repositories/${repo.id}`, { includePrereleases: false, isEnabled: true, installedVersionApp: { kind: 'home-assistant', id: addon.id } });
+    assert.equal(chosen.status, 200, JSON.stringify(chosen.body));
+    assert.equal(chosen.body.installedVersion, '2.10.13');
+    let linked = await component('Music Assistant');
+    assert.equal(linked.repository.id, repo.id);
+    assert.equal(linked.repositoryChosen, true);
+
+    states = [update('update.music_assistant_update', { title: 'Music Assistant', installed_version: '2.10.14', latest_version: '2.10.14' })];
+    await recheck();
+    linked = await component('Music Assistant');
+    assert.equal(linked.repositoryName, 'music-assistant/server');
+    assert.equal((await repository(repo.id)).installedVersion, '2.10.14');
+  });
+
 
 });

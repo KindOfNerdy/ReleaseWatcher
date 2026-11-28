@@ -1105,9 +1105,6 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     if (machineApp && !machineOption) {
       return validationProblem('installedVersionApp', 'The app is not on any machine (any more) – check the machine first.');
     }
-    if (machineApp?.kind === 'home-assistant' && machineOption?.repositoryId !== repo.id) {
-      return validationProblem('installedVersionApp', 'This Home Assistant component names another repository.');
-    }
     const icon = body.icon === undefined ? undefined : body.icon?.trim() || null;
     const iconError = icon ? validateIcon(icon) : null;
     if (iconError) {

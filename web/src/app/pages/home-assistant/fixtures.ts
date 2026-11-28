@@ -25,6 +25,7 @@ export const haComponent = (overrides: Partial<HomeAssistantComponent> = {}): Ho
   latestVersion: 'v7.0.1',
   releaseUrl: 'https://github.com/custom-cards/button-card/releases/tag/v7.0.1',
   repositoryName: 'custom-cards/button-card',
+  repositoryChosen: false,
   lastSeenAt: '2026-01-01T00:00:00Z',
   versionComparable: true,
   homeAssistantUpdate: true,

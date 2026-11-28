@@ -1200,8 +1200,10 @@ export interface HomeAssistantComponent {
   /** Newest version Home Assistant knows of. */
   latestVersion: string | null;
   releaseUrl: string | null;
-  /** Repository the entity names, lower-case (`owner/name`, or `host/owner/name` outside GitHub). */
+  /** Repository of the component, lower-case (`owner/name`, or `host/owner/name` outside GitHub); empty = none. */
   repositoryName: string;
+  /** The repository was chosen by hand (in a repository's installed-version settings), not named by the entity. */
+  repositoryChosen: boolean;
   /** When the entity was last read. */
   lastSeenAt: string | null;
   /** False for a commit hash (a repository without releases). */

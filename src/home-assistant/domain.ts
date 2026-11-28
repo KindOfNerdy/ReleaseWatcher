@@ -44,8 +44,12 @@ export interface HomeAssistantComponent {
   /** Newest version Home Assistant knows of (it checks on its own schedule). */
   latestVersion: string | null;
   releaseUrl: string | null;
-  /** Repository named by the entity as its lower-case `fullName()`. */
+  /** Repository the component belongs to as its lower-case `fullName()`: the one chosen by hand, else the one the entity names; empty = none. */
   repository: string;
+  /** Repository the entity names itself; empty for an add-on that names none. */
+  detectedRepository: string;
+  /** `repository` was chosen by hand (in a repository's installed-version settings), not named by the entity. */
+  repositoryChosen: boolean;
   /** The entity can make a backup before installing (`backup: true`). */
   supportsBackup: boolean;
   /** Why the last installation from ReleaseWatcher failed; null = it worked (or none ran). */
@@ -57,7 +61,7 @@ export interface HomeAssistantComponent {
 }
 
 /** A component as read from the states, before it is stored. */
-export type ReadComponent = Omit<HomeAssistantComponent, 'id' | 'connectionId' | 'lastSeenAt' | 'repositoryId' | 'installError'>;
+export type ReadComponent = Omit<HomeAssistantComponent, 'id' | 'connectionId' | 'lastSeenAt' | 'repositoryId' | 'installError' | 'detectedRepository' | 'repositoryChosen'>;
 
 /** Longest name accepted for a connection. */
 export const MAX_NAME_LENGTH = 100;
@@ -116,14 +120,27 @@ export function entityRepository(entityId: string, releaseUrl: string | null): s
   return parsed ? fullName(parsed).toLowerCase() : null;
 }
 
+/** Code hosts whose pages are never just a project's website. */
+const CODE_HOSTS = new Set(['github.com', 'gitlab.com', 'codeberg.org', 'bitbucket.org']);
+
+/** A project's website: a web address that is not on a code host (an add-on that names no repository). */
+export function isWebsite(address: string): boolean {
+  try {
+    const url = new URL(address);
+    return (url.protocol === 'https:' || url.protocol === 'http:') && !CODE_HOSTS.has(url.host.toLowerCase().replace(/^www\./, ''));
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Maps `GET /api/states` to the components: every update entity Home Assistant can install that names a repository,
  * whether an update is pending or not – one it only announces is about something running elsewhere (an integration
- * reporting the version of its server) and left out. `projectUrls` (entity id → URL) names the project of entities
- * without a release link – add-ons, whose Supervisor knows it; only a repository's own address counts there, not a
- * folder in a collection. Sorted by name.
+ * reporting the version of its server) and left out. `projectUrls` (entity id → URLs to try) names the project of entities without a release link – add-ons, whose
+ * Supervisor knows it; only a repository's own address counts there, not a folder in a collection. An add-on that names
+ * no repository is kept with an empty `repository`, so it can be linked to one by hand. Sorted by name.
  */
-export function componentsFromStates(states: unknown, projectUrls: ReadonlyMap<string, string> = new Map()): ReadComponent[] {
+export function componentsFromStates(states: unknown, projectUrls: ReadonlyMap<string, readonly string[]> = new Map()): ReadComponent[] {
   if (!Array.isArray(states)) {
     throw new Error('Home Assistant answered with something other than a list of states.');
   }
@@ -139,8 +156,12 @@ export function componentsFromStates(states: unknown, projectUrls: ReadonlyMap<s
     >;
     const releaseUrl = str(attributes['release_url']);
     // Add-ons name no release; the Supervisor knows their project URL (see `projectUrls`).
-    const repository = entityRepository(entityId, releaseUrl) ?? entityRepository(entityId, projectUrls.get(entityId) ?? null);
-    if (!repository) {
+    const addon = projectUrls.get(entityId);
+    const repository =
+      entityRepository(entityId, releaseUrl) ??
+      (addon ?? []).map((url) => entityRepository(entityId, url)).find((name) => name !== null) ??
+      (addon ? '' : null);
+    if (repository === null) {
       continue;
     }
     const features = attributes['supported_features'];

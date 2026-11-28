@@ -67,8 +67,8 @@ export class InstallBlockedError extends Error {
 }
 
 /** What the API shows of a component. */
-export interface HomeAssistantComponentView extends Omit<HomeAssistantComponent, 'repository' | 'repositoryId'> {
-  /** Repository the entity names, lower-case (`owner/name`, or `host/owner/name` outside GitHub). */
+export interface HomeAssistantComponentView extends Omit<HomeAssistantComponent, 'repository' | 'repositoryId' | 'detectedRepository'> {
+  /** Repository of the component, lower-case (`owner/name`, or `host/owner/name` outside GitHub); empty = none. */
   repositoryName: string;
   /** False for a commit hash (a repository without releases): shown, but not compared with releases. */
   versionComparable: boolean;
@@ -399,7 +399,7 @@ export class HomeAssistantService {
       const pending = c.hasUpdate;
       const repo = c.repositoryId === null ? undefined : byId.get(c.repositoryId);
       const comparable = isComparableVersion(c.installedVersion);
-      const { repository: repositoryName, repositoryId: _linked, ...rest } = c;
+      const { repository: repositoryName, repositoryId: _linked, detectedRepository: _detected, ...rest } = c;
       return {
         ...rest,
         repositoryName,
@@ -410,7 +410,7 @@ export class HomeAssistantService {
         repository: repo
           ? { id: repo.id, fullName: fullName(repo), url: repositoryUrl(repo), latestVersion: repo.lastSeenTag, iconUrls: iconUrls(repo.icon) }
           : null,
-        suggestedRepository: c.repositoryId === null ? c.repository : null,
+        suggestedRepository: c.repositoryId === null && c.repository ? c.repository : null,
         updateAvailable: repo && comparable ? appUpdateAvailable({ installedVersion: c.installedVersion, latestVersion: repo.lastSeenTag }) : null,
       };
     });

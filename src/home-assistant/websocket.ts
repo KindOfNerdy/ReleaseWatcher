@@ -3,6 +3,7 @@
  * marketplace repository. One connection per call sequence: authenticate, send the commands in order, close.
  */
 import { HomeAssistantApiError } from '../proxmox/home-assistant-api.ts';
+import { isWebsite } from './domain.ts';
 
 /** The part of a WebSocket the client uses (tests pass a fake). */
 export interface SocketLike {
@@ -95,23 +96,32 @@ export function runCommands(
 }
 
 /**
- * Project URLs of the add-ons (entity id of their update entity → URL), as the Supervisor knows them – add-on update
- * entities name no release. Empty without a Supervisor (Container and Core installations) or when the token may not ask
- * (the Supervisor API is for administrators only); this never fails a check.
+ * Where the add-ons say their project is (entity id of their update entity → URLs to try in order), as the Supervisor
+ * knows them – add-on update entities name no release. First the add-on's own URL; when that is only a website, also
+ * the repository of its add-on store, unless the store too points elsewhere (another project's repository). An add-on
+ * without any URL maps to an empty list. Empty without a Supervisor (Container and Core installations) or when the token
+ * may not ask (the Supervisor API is for administrators only); this never fails a check.
  */
 export async function addonProjectUrls(
   connection: { url: string; token: string },
   options: { timeoutMs: number; socket?: SocketFactory },
-): Promise<Map<string, string>> {
+): Promise<Map<string, string[]>> {
   let registry: { entity_id?: unknown; platform?: unknown; unique_id?: unknown }[] = [];
+  let addons: { slug?: unknown; url?: unknown; repository?: unknown }[] = [];
   try {
     const result = await runCommands(
       connection,
       { type: 'config/entity_registry/list' },
       (value, index) => {
-        if (index !== 1) return null;
-        registry = Array.isArray(value) ? value : [];
-        return { type: 'supervisor/api', endpoint: '/addons', method: 'get' };
+        if (index === 1) {
+          registry = Array.isArray(value) ? value : [];
+          return { type: 'supervisor/api', endpoint: '/addons', method: 'get' };
+        }
+        if (index === 2) {
+          addons = ((value ?? {}) as { addons?: typeof addons }).addons ?? [];
+          return { type: 'supervisor/api', endpoint: '/store/repositories', method: 'get' };
+        }
+        return null;
       },
       options,
     );
@@ -123,12 +133,23 @@ export async function addonProjectUrls(
         bySlug.set(id.slice(0, -'_version_latest'.length), entry.entity_id);
       }
     }
-    const urls = new Map<string, string>();
-    for (const addon of ((result ?? {}) as { addons?: { slug?: unknown; url?: unknown }[] }).addons ?? []) {
+    const text = (value: unknown): string | null => (typeof value === 'string' && value.trim() ? value.trim() : null);
+    const stores = new Map<string, { source: string | null; url: string | null }>();
+    for (const store of Array.isArray(result) ? (result as { slug?: unknown; source?: unknown; url?: unknown }[]) : []) {
+      const slug = text(store.slug);
+      if (slug) stores.set(slug, { source: text(store.source), url: text(store.url) });
+    }
+    const urls = new Map<string, string[]>();
+    for (const addon of addons) {
       const entityId = typeof addon.slug === 'string' ? bySlug.get(addon.slug) : undefined;
-      if (entityId && typeof addon.url === 'string' && addon.url.trim()) {
-        urls.set(entityId, addon.url.trim());
+      if (!entityId) continue;
+      const own = text(addon.url);
+      const store = stores.get(text(addon.repository) ?? '');
+      const candidates = own ? [own] : [];
+      if (own && isWebsite(own) && store?.source && (!store.url || isWebsite(store.url))) {
+        candidates.push(store.source);
       }
+      urls.set(entityId, candidates);
     }
     return urls;
   } catch {

@@ -45,6 +45,23 @@ describe('HomeAssistantPage', () => {
     expect(commit!.textContent).toContain('Commit');
   });
 
+  it('shows an add-on that names no repository without a link or a watch button', async () => {
+    const addon = haComponent({
+      id: 4,
+      entityId: 'update.music_assistant_update',
+      name: 'Music Assistant',
+      releaseUrl: null,
+      repositoryName: '',
+      suggestedRepository: null,
+      homeAssistantUpdate: false,
+    });
+    const { el } = await create(haOverview({ components: [addon] }));
+    const [row] = rows(el);
+    expect(row!.textContent).toContain('no repository');
+    expect(row!.querySelector('a.repository')).toBeNull();
+    expect(row!.textContent).not.toContain('Watch');
+  });
+
   it('links repositories outside GitHub to their host', () => {
     expect(repositoryLink('owner/repo')).toBe('https://github.com/owner/repo');
     expect(repositoryLink('codeberg.org/owner/repo')).toBe('https://codeberg.org/owner/repo');

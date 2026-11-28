@@ -97,7 +97,7 @@ export class MachineApps {
       });
     }
 
-    // A Home Assistant component belongs to the repository it names – there is no other link to choose.
+    // A Home Assistant component belongs to the repository it names, or the one chosen for it by hand.
     const connectionNames = new Map(homeAssistant.listConnections().map((c) => [c.id, c.name]));
     for (const h of homeAssistant.listComponents()) {
       group('home-assistant', h.connectionId, connectionNames.get(h.connectionId) ?? `#${h.connectionId}`).apps.push({
@@ -128,7 +128,11 @@ export class MachineApps {
    */
   link(ref: MachineAppRef, repositoryId: number): void {
     if (ref.kind === 'home-assistant') {
-      return; // linked by the repository the component names
+      // A component belongs to the repository it names; choosing another one here (or one for an add-on that names
+      // only its website) is kept for that entity across checks.
+      const repo = this.deps.repositories.get(repositoryId);
+      if (repo) this.deps.homeAssistant.chooseRepository(ref.id, fullName(repo).toLowerCase());
+      return;
     }
     if (ref.kind === 'app') {
       const app = this.deps.containers.findApp(ref.id);

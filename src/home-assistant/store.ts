@@ -24,6 +24,8 @@ interface ComponentRow {
   latest_version: string | null;
   release_url: string | null;
   repository: string;
+  detected_repository: string;
+  repository_chosen: number;
   supports_backup: number;
   install_error: string | null;
   last_seen_at: string | null;
@@ -31,9 +33,10 @@ interface ComponentRow {
 }
 
 /** Components with the id of the watched repository they name (`full_name` has a unique index). */
-const SELECT_COMPONENTS = `SELECT c.*, r.id AS repository_id
+const SELECT_COMPONENTS = `SELECT c.*, r.id AS repository_id, ch.repository IS NOT NULL AS repository_chosen
                              FROM home_assistant_components c
-                             LEFT JOIN watched_repositories r ON r.full_name = c.repository`;
+                             LEFT JOIN watched_repositories r ON r.full_name = c.repository
+                             LEFT JOIN home_assistant_repository_choices ch ON ch.connection_id = c.connection_id AND ch.entity_id = c.entity_id`;
 
 const toComponent = (r: ComponentRow): HomeAssistantComponent => ({
   id: r.id,
@@ -45,6 +48,8 @@ const toComponent = (r: ComponentRow): HomeAssistantComponent => ({
   latestVersion: r.latest_version,
   releaseUrl: r.release_url,
   repository: r.repository,
+  detectedRepository: r.detected_repository,
+  repositoryChosen: r.repository_chosen === 1,
   supportsBackup: r.supports_backup === 1,
   installError: r.install_error,
   lastSeenAt: r.last_seen_at,
@@ -123,20 +128,27 @@ export class HomeAssistantStore {
 
   /**
    * Stores what a connection's update entities say now: known entities are updated in place (they keep their id), new
-   * ones are added and those Home Assistant no longer has are removed.
+   * ones are added and those Home Assistant no longer has are removed. A repository chosen by hand stays in effect.
    */
   replaceComponents(connectionId: number, components: readonly ReadComponent[], now: Date): void {
     const upsert = this.db.query(
       `INSERT INTO home_assistant_components (connection_id, entity_id, name, has_update, installed_version, latest_version, release_url,
-                                              repository, supports_backup, last_seen_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                              repository, detected_repository, supports_backup, last_seen_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (connection_id, entity_id) DO UPDATE SET
          name = excluded.name, has_update = excluded.has_update, installed_version = excluded.installed_version,
          latest_version = excluded.latest_version, release_url = excluded.release_url, repository = excluded.repository,
+         detected_repository = excluded.detected_repository,
          supports_backup = excluded.supports_backup, last_seen_at = excluded.last_seen_at`,
     );
     const seenAt = now.toISOString();
     const remove = this.db.query('DELETE FROM home_assistant_components WHERE id = ?');
+    const chosen = new Map(
+      this.db
+        .query<{ entity_id: string; repository: string }, [number]>('SELECT entity_id, repository FROM home_assistant_repository_choices WHERE connection_id = ?')
+        .all(connectionId)
+        .map((r) => [r.entity_id, r.repository]),
+    );
     this.db.transaction(() => {
       const seen = new Set(components.map((c) => c.entityId));
       for (const existing of this.listComponents(connectionId)) {
@@ -144,10 +156,31 @@ export class HomeAssistantStore {
       }
       for (const c of components) {
         upsert.run(
-          connectionId, c.entityId, c.name, c.hasUpdate ? 1 : 0, c.installedVersion, c.latestVersion, c.releaseUrl, c.repository,
-          c.supportsBackup ? 1 : 0, seenAt,
+          connectionId, c.entityId, c.name, c.hasUpdate ? 1 : 0, c.installedVersion, c.latestVersion, c.releaseUrl,
+          chosen.get(c.entityId) ?? c.repository, c.repository, c.supportsBackup ? 1 : 0, seenAt,
         );
       }
+    })();
+  }
+
+  /**
+   * Links a component to a repository by hand (lower-case `fullName()`), kept across checks; null – or the repository the
+   * entity names itself – goes back to that one. The installed-version triggers follow the change of `repository`.
+   */
+  chooseRepository(componentId: number, repository: string | null): void {
+    const component = this.getComponent(componentId);
+    if (!component) return;
+    this.db.transaction(() => {
+      if (repository === null || repository === component.detectedRepository) {
+        this.db.query('DELETE FROM home_assistant_repository_choices WHERE connection_id = ? AND entity_id = ?').run(component.connectionId, component.entityId);
+      } else {
+        this.db
+          .query('INSERT INTO home_assistant_repository_choices (connection_id, entity_id, repository) VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET repository = excluded.repository')
+          .run(component.connectionId, component.entityId, repository);
+      }
+      this.db
+        .query('UPDATE home_assistant_components SET repository = ? WHERE id = ? AND repository IS NOT ?')
+        .run(repository ?? component.detectedRepository, componentId, repository ?? component.detectedRepository);
     })();
   }
 

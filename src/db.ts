@@ -909,6 +909,16 @@ export const MIGRATIONS: readonly string[] = [
   `ALTER TABLE home_assistant_connections ADD COLUMN install_enabled INTEGER NOT NULL DEFAULT 0;
    ALTER TABLE home_assistant_components ADD COLUMN supports_backup INTEGER NOT NULL DEFAULT 0;
    ALTER TABLE home_assistant_components ADD COLUMN install_error TEXT;`,
+  // A component can be linked to a repository by hand (an add-on that names only its website): the choice is kept per
+  // entity across checks, `repository` holds the repository in effect and `detected_repository` the one the entity names.
+  `CREATE TABLE home_assistant_repository_choices (
+     connection_id INTEGER NOT NULL REFERENCES home_assistant_connections (id) ON DELETE CASCADE,
+     entity_id     TEXT    NOT NULL,
+     repository    TEXT    NOT NULL,
+     PRIMARY KEY (connection_id, entity_id)
+   );
+   ALTER TABLE home_assistant_components ADD COLUMN detected_repository TEXT NOT NULL DEFAULT '';
+   UPDATE home_assistant_components SET detected_repository = repository;`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */

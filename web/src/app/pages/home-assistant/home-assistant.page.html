@@ -132,9 +132,17 @@
           <div class="row">
             <span class="name" [title]="c.entityId">{{ c.name }}</span>
             @if (c.repository; as repo) {
-              <a class="repository mono" [href]="repo.url" target="_blank" rel="noopener" title="Watched – releases of this repository are compared with the installed version">
+              <a
+                class="repository mono"
+                [href]="repo.url"
+                target="_blank"
+                rel="noopener"
+                [title]="c.repositoryChosen ? 'Linked by hand in the settings of this repository – its releases are compared with the installed version' : 'Watched – releases of this repository are compared with the installed version'"
+              >
                 <app-icon name="repo" [size]="12" /> {{ repo.fullName }}
               </a>
+            } @else if (!c.repositoryName) {
+              <span class="repository muted small" title="Home Assistant names no repository for it – choose it as the installed version in the settings of a watched repository">no repository</span>
             } @else {
               <a class="repository mono" [href]="repositoryLink(c.repositoryName)" target="_blank" rel="noopener">
                 {{ c.repositoryName }} <app-icon name="external" [size]="12" />
