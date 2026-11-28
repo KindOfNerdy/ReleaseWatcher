@@ -71,6 +71,8 @@ export const MAX_TOKEN_LENGTH = 1000;
 /** Home Assistant Core links its release notes page instead of a repository. */
 export const CORE_ENTITY_ID = 'update.home_assistant_core_update';
 export const CORE_REPOSITORY = 'home-assistant/core';
+/** The operating system: installing it restarts the whole machine, so "Update" for several leaves it out. */
+export const OS_ENTITY_ID = 'update.home_assistant_operating_system_update';
 
 /** `UpdateEntityFeature.INSTALL` and `.BACKUP` of Home Assistant (`supported_features` of an update entity). */
 const FEATURE_INSTALL = 1;
@@ -206,4 +208,21 @@ export function installBlocker(
     return 'Home Assistant has no update for this component.';
   }
   return null;
+}
+
+/**
+ * What "Update" installs for a connection, in order: every component whose update can be installed from ReleaseWatcher
+ * (`installBlocker`), only those asked for when `ids` is given, never the operating system (it restarts the machine –
+ * install it on its own) and Home Assistant Core last, since it restarts Home Assistant.
+ */
+export function updatesToInstall<C extends Pick<HomeAssistantComponent, 'id' | 'entityId' | 'hasUpdate'>>(
+  components: readonly C[],
+  connection: Pick<HomeAssistantConnection, 'installEnabled'>,
+  ids?: readonly number[],
+): C[] {
+  const wanted = ids ? new Set(ids) : null;
+  const picked = components.filter(
+    (c) => installBlocker(c, connection) === null && c.entityId !== OS_ENTITY_ID && (!wanted || wanted.has(c.id)),
+  );
+  return [...picked.filter((c) => c.entityId !== CORE_ENTITY_ID), ...picked.filter((c) => c.entityId === CORE_ENTITY_ID)];
 }

@@ -179,6 +179,46 @@ describe('HomeAssistantPage', () => {
     fixture.destroy();
   });
 
+  it('installs the chosen updates one after another and offers the restart afterwards', async () => {
+    const connection = haConnection({ installEnabled: true });
+    const card = haComponent({ installBlocker: null, supportsBackup: false });
+    const addon = haComponent({ id: 4, entityId: 'update.addon_update', name: 'Add-on', repositoryName: 'owner/addon', installBlocker: null, supportsBackup: true });
+    const os = haComponent({ id: 5, entityId: 'update.home_assistant_operating_system_update', name: 'Operating System', repositoryName: 'home-assistant/operating-system', installBlocker: null });
+    const { fixture, el } = await create(haOverview({ connections: [connection], components: [addon, card, os] }));
+    const header = () => el.querySelector('.header-actions')!;
+    const headerButton = (text: string) => [...header().querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim().startsWith(text))!;
+
+    headerButton('Update').click();
+    await settle(fixture);
+    // Every installable update is ticked – not the operating system, which is installed on its own.
+    const picks = () => [...el.querySelectorAll<HTMLInputElement>('input.pick')];
+    expect(picks().map((p) => p.getAttribute('aria-label'))).toEqual(['Update Add-on', 'Update Button Card']);
+    expect(header().textContent).toContain('2 of 2 update(s) selected');
+    picks()[1]!.click();
+    await settle(fixture);
+    expect(header().textContent).toContain('1 of 2 update(s) selected');
+
+    headerButton('Update 1').click();
+    const post = http.expectOne({ method: 'POST', url: '/api/home-assistant/connections/1/update' });
+    expect(post.request.body).toEqual({ ids: [4], backup: true });
+    post.flush({ ...connection, isChecking: true });
+    await settle(fixture);
+    http.expectOne('/api/home-assistant').flush(
+      haOverview({ connections: [{ ...connection, isChecking: true }], components: [{ ...addon, isInstalling: true }, card, os] }),
+    );
+    await settle(fixture);
+    expect(el.querySelector('.source-actions')!.textContent).toContain('Installing Add-on…');
+
+    // Done: the integration waits for a restart, which is offered once.
+    fixture.componentInstance['load']();
+    http.expectOne('/api/home-assistant').flush(
+      haOverview({ connections: [{ ...connection, pendingRestarts: ['Add-on'] }], components: [{ ...addon, installBlocker: 'Home Assistant has no update for this component.', homeAssistantUpdate: false }, card, os] }),
+    );
+    await settle(fixture);
+    expect(el.querySelector('.source-actions')!.textContent).toContain('Restart Home Assistant?');
+    fixture.destroy();
+  });
+
   it('shows why the last installation failed', async () => {
     const failed = haComponent({ installBlocker: null, installError: 'Home Assistant answered 500: Update failed.' });
     const { el } = await create(haOverview({ components: [failed] }));

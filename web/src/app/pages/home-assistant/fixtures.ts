@@ -14,6 +14,7 @@ export const haConnection = (overrides: Partial<HomeAssistantConnection> = {}): 
   isChecking: false,
   isRestarting: false,
   pendingRestarts: [],
+  queuedUpdates: 0,
   ...overrides,
 });
 

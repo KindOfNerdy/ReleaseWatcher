@@ -25,6 +25,9 @@ interface ConnectionCard {
   components: HomeAssistantComponent[];
 }
 
+/** The operating system restarts the whole machine: "Update" leaves it out, it is installed on its own. */
+export const OS_ENTITY_ID = 'update.home_assistant_operating_system_update';
+
 /** While a connection or the scheduled run is being read, the page reloads this often. */
 const POLL_MS = 2000;
 
@@ -72,6 +75,11 @@ export class HomeAssistantPage {
   protected readonly confirmingRestart = signal<number | null>(null);
   /** Component ids whose repository is being added to the watch list. */
   protected readonly watching = signal<ReadonlySet<number>>(new Set());
+  /** Components ticked for "Update" (null = not choosing). */
+  protected readonly picked = signal<ReadonlySet<number> | null>(null);
+  protected readonly updateBackup = signal(true);
+  /** Connections with an "Update" run started from this page (to offer the restart when it ends). */
+  private readonly updating = signal<ReadonlySet<number>>(new Set());
   protected readonly hasUpdate = hasUpdate;
   protected readonly newerVersion = newerVersion;
 
@@ -83,6 +91,21 @@ export class HomeAssistantPage {
       unwatched: components.filter((c) => c.suggestedRepository !== null).length,
     };
   });
+
+  /** What "Update" can install: updates Home Assistant offers and allows from here, without the operating system. */
+  protected readonly updatable = computed(() =>
+    (this.overview()?.components ?? []).filter((c) => this.canInstall(c) && c.entityId !== OS_ENTITY_ID),
+  );
+  protected readonly pickedUpdatable = computed(() => {
+    const picked = this.picked();
+    return picked ? this.updatable().filter((c) => picked.has(c.id)) : [];
+  });
+  /** Something is being installed or read right now – "Update" waits. */
+  protected readonly anyBusy = computed(
+    () =>
+      !!this.overview()?.connections.some((c) => c.isChecking || c.isRestarting) ||
+      !!this.overview()?.components.some((c) => c.isInstalling),
+  );
 
   protected readonly cards = computed<ConnectionCard[]>(() => {
     const data = this.overview();
@@ -128,6 +151,7 @@ export class HomeAssistantPage {
       const overview = await firstValueFrom(this.api.getHomeAssistant());
       this.overview.set(overview);
       this.loadError.set(null);
+      this.finishUpdates(overview);
       if (this.checkingAll() && !overview.check.isRunning) {
         this.checkingAll.set(false);
         this.toast.success('Home Assistant checked.');
@@ -167,6 +191,77 @@ export class HomeAssistantPage {
         return next;
       });
     }
+  }
+
+  /** "Update": ticks every update that can be installed; the second step installs the ticked ones. */
+  protected startPicking(): void {
+    this.updateBackup.set(true);
+    this.picked.set(new Set(this.updatable().map((c) => c.id)));
+  }
+
+  protected togglePick(id: number): void {
+    this.picked.update((s) => {
+      const next = new Set(s ?? []);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  protected togglePickAll(): void {
+    const all = this.pickedUpdatable().length === this.updatable().length;
+    this.picked.set(new Set(all ? [] : this.updatable().map((c) => c.id)));
+  }
+
+  /** Installs the ticked updates, one run per connection (Core last, see the server). */
+  protected async updatePicked(): Promise<void> {
+    const chosen = this.pickedUpdatable();
+    this.picked.set(null);
+    const byConnection = new Map<number, number[]>();
+    for (const c of chosen) byConnection.set(c.connectionId, [...(byConnection.get(c.connectionId) ?? []), c.id]);
+    for (const [connectionId, ids] of byConnection) {
+      try {
+        this.replaceConnection(await firstValueFrom(this.api.installHomeAssistantUpdates(connectionId, ids, this.updateBackup())));
+        this.updating.update((s) => new Set(s).add(connectionId));
+      } catch (error) {
+        this.toast.error(error);
+      }
+    }
+    await this.load();
+  }
+
+  /** An "Update" run ended: say so, and offer the restart when integrations or cards wait for one. */
+  private finishUpdates(overview: HomeAssistantOverview): void {
+    for (const id of this.updating()) {
+      const connection = overview.connections.find((c) => c.id === id);
+      const running = connection?.isChecking || connection?.isRestarting || overview.components.some((c) => c.connectionId === id && c.isInstalling);
+      if (running) continue;
+      this.updating.update((s) => {
+        const next = new Set(s);
+        next.delete(id);
+        return next;
+      });
+      const failed = overview.components.filter((c) => c.connectionId === id && c.installError);
+      if (failed.length > 0) {
+        this.toast.error(`${failed.length} update(s) could not be installed – see the components.`);
+      } else {
+        this.toast.success('Updates installed.');
+      }
+      if (connection && connection.pendingRestarts.length > 0) {
+        this.confirmingRestart.set(connection.id);
+      }
+    }
+  }
+
+  protected readonly supportsBackup = (c: HomeAssistantComponent): boolean => c.supportsBackup;
+
+  protected isUpdatable(c: HomeAssistantComponent): boolean {
+    return this.updatable().some((u) => u.id === c.id);
+  }
+
+  /** The component being installed on a connection, if any. */
+  protected installingOn(connection: HomeAssistantConnection): HomeAssistantComponent | null {
+    return this.overview()?.components.find((c) => c.connectionId === connection.id && c.isInstalling) ?? null;
   }
 
   /** A component whose pending update can be installed from here. */

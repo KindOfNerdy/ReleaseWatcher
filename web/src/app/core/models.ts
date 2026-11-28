@@ -1189,6 +1189,8 @@ export interface HomeAssistantConnection {
   isRestarting: boolean;
   /** What waits for a restart of Home Assistant (installed integrations or cards, from its repair issues). */
   pendingRestarts: string[];
+  /** Updates of an "Update" run still waiting after the one being installed. */
+  queuedUpdates: number;
 }
 
 /** An update entity of a connection that names a repository (Core, an add-on, an integration, a card …). */

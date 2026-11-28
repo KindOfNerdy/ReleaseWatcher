@@ -19,6 +19,12 @@
   font-weight: 600;
 }
 
+.pick {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
 .repository {
   display: inline-flex;
   align-items: center;

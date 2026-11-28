@@ -357,6 +357,11 @@ export class ApiService {
   }
 
   /** Restarts Home Assistant (only with installing switched on for the connection). */
+  /** Installs several updates of a connection one after another (all that can be installed, or `ids`). */
+  installHomeAssistantUpdates(connectionId: number, ids: number[], backup: boolean): Observable<HomeAssistantConnection> {
+    return this.http.post<HomeAssistantConnection>(`${this.baseUrl}/home-assistant/connections/${connectionId}/update`, { ids, backup });
+  }
+
   restartHomeAssistant(id: number): Observable<HomeAssistantConnection> {
     return this.http.post<HomeAssistantConnection>(`${this.baseUrl}/home-assistant/connections/${id}/restart`, {});
   }

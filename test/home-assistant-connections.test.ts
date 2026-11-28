@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, it } from 'bun:test';
 import { buildApp, type App } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
 import { RepositoryStore } from '../src/db.ts';
-import { componentsFromStates, entityRepository, isComparableVersion } from '../src/home-assistant/domain.ts';
+import { componentsFromStates, entityRepository, isComparableVersion, updatesToInstall } from '../src/home-assistant/domain.ts';
 import { silentLogger } from '../src/log.ts';
 import { SettingsService } from '../src/settings.ts';
 import { FakeSource, RecordingNotifier, release } from './helpers.ts';
@@ -29,6 +29,21 @@ describe('Home Assistant connections: domain', () => {
     assert.equal(entityRepository('update.gist', 'https://gist.github.com/owner/0123456789abcdef'), null);
     assert.equal(entityRepository('update.http', 'http://github.com/owner/repo'), null);
     assert.equal(entityRepository('update.none', null), null);
+  });
+
+  it('installs updates in a safe order: Core last, never the operating system', () => {
+    const c = (id: number, entityId: string, hasUpdate = true) => ({ id, entityId, hasUpdate });
+    const components = [
+      c(1, 'update.home_assistant_core_update'),
+      c(2, 'update.home_assistant_operating_system_update'),
+      c(3, 'update.card_update'),
+      c(4, 'update.current_update', false),
+      c(5, 'update.addon_update'),
+    ];
+    const on = { installEnabled: true };
+    assert.deepEqual(updatesToInstall(components, on).map((x) => x.id), [3, 5, 1]);
+    assert.deepEqual(updatesToInstall(components, on, [1, 2, 5]).map((x) => x.id), [5, 1]);
+    assert.deepEqual(updatesToInstall(components, { installEnabled: false }), []);
   });
 
   it('keeps the update entities that name a repository, pending or not', () => {
@@ -648,6 +663,71 @@ describe('Home Assistant connections: API', () => {
     assert.equal((await component('Add-on')).supportsBackup, true);
     assert.equal((await install('Add-on', { backup: true })).status, 202);
     assert.deepEqual(installs, [{ entity_id: 'update.addon_update', backup: true }]);
+  });
+
+  // --- Installing several at once ---
+
+  const updateAll = async (payload: Record<string, unknown> = {}) => {
+    const [connection] = (await request('GET', '/api/home-assistant/connections')).body;
+    const response = await request('POST', `/api/home-assistant/connections/${connection.id}/update`, payload);
+    await app.homeAssistant.idle();
+    return response;
+  };
+  /** Pending updates: Button Card, an add-on with backups, Core and the operating system. */
+  const severalUpdates = () => {
+    const core = (states as { entity_id: string; state: string; attributes: Record<string, unknown> }[])[2]!;
+    core.state = 'on';
+    core.attributes['latest_version'] = '2026.11.4';
+    (states as unknown[]).push(
+      update('update.addon_update', { title: 'Add-on', installed_version: '1.0', latest_version: '1.1', release_url: 'https://github.com/owner/addon/releases/tag/1.1', supported_features: 1 | 8 }, 'on'),
+      update('update.home_assistant_operating_system_update', { title: 'Home Assistant Operating System', installed_version: '17.0', latest_version: '17.1', release_url: 'https://github.com/home-assistant/operating-system/releases/tag/17.1' }, 'on'),
+    );
+  };
+
+  it('installs every update one after another, Core last and never the operating system', async () => {
+    severalUpdates();
+    await addConnection({ installEnabled: true });
+    const started = await updateAll({ backup: true });
+    assert.equal(started.status, 202);
+    assert.deepEqual(installs, [
+      { entity_id: 'update.addon_update', backup: true },
+      { entity_id: 'update.button_card_update' },
+      { entity_id: 'update.home_assistant_core_update' },
+    ]);
+    const [connection] = (await request('GET', '/api/home-assistant')).body.connections;
+    assert.equal(connection.queuedUpdates, 0);
+    assert.equal((await component('Home Assistant Operating System')).homeAssistantUpdate, true);
+  });
+
+  it('installs only the chosen updates and stops when an administrator is needed', async () => {
+    severalUpdates();
+    await addConnection({ installEnabled: true });
+    const ids = [(await component('Button Card')).id, (await component('Add-on')).id];
+    await updateAll({ ids });
+    assert.deepEqual(installs.map((i) => i.entity_id), ['update.addon_update', 'update.button_card_update']);
+
+    installs = [];
+    (states as { entity_id: string; state: string }[]).forEach((e) => {
+      if (e.entity_id !== 'update.home_assistant_operating_system_update') e.state = 'on';
+    });
+    await recheck();
+    installFailure = new Response('401: Unauthorized', { status: 401 });
+    await updateAll();
+    assert.equal(installs.length, 1);
+    assert.match((await component('Add-on')).installError, /administrator rights/);
+  });
+
+  it('refuses "Update" with installing switched off or nothing to install', async () => {
+    await addConnection();
+    assert.equal((await updateAll()).status, 409);
+    const [connection] = (await request('GET', '/api/home-assistant/connections')).body;
+    await request('PUT', `/api/home-assistant/connections/${connection.id}`, { name: 'Home', url: connection.url, installEnabled: true });
+    states = [update('update.button_card_update', { title: 'Button Card', installed_version: 'v7.0.1', latest_version: 'v7.0.1', release_url: 'https://github.com/custom-cards/button-card/releases/tag/v7.0.1' })];
+    await recheck();
+    const nothing = await updateAll();
+    assert.equal(nothing.status, 409);
+    assert.match(nothing.body.title, /no update to install/);
+    assert.deepEqual(installs, []);
   });
 
   it('keeps the reason when Home Assistant refuses the installation', async () => {

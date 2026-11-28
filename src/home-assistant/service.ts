@@ -13,6 +13,7 @@ import {
   installBlocker,
   isComparableVersion,
   type ReadComponent,
+  updatesToInstall,
 } from './domain.ts';
 import type { HomeAssistantStore } from './store.ts';
 
@@ -98,6 +99,8 @@ export class HomeAssistantService {
   private readonly installing = new Map<number, number>();
   /** Connections whose Home Assistant is restarting right now (asked for, or while Core updates). */
   private readonly restarting = new Set<number>();
+  /** Updates still waiting after the current one, by connection ("Update" for several at once). */
+  private readonly queued = new Map<number, number>();
   /** What waits for a restart, by connection (read with every check; kept in memory). */
   private readonly restartsNeeded = new Map<number, string[]>();
   private readonly pollMs: number;
@@ -115,6 +118,11 @@ export class HomeAssistantService {
   /** Names of what waits for a restart of the connection's Home Assistant (marketplace or HACS repair issues). */
   pendingRestarts(connectionId: number): string[] {
     return this.restartsNeeded.get(connectionId) ?? [];
+  }
+
+  /** Updates of an "Update" run still waiting after the one being installed. */
+  queuedUpdates(connectionId: number): number {
+    return this.queued.get(connectionId) ?? 0;
   }
 
   isChecking(connectionId: number): boolean {
@@ -257,6 +265,52 @@ export class HomeAssistantService {
     const current = store.getConnection(connection.id);
     if (current) {
       await this.check(current);
+    }
+  }
+
+  /**
+   * Starts installing several updates of a connection one after another in the background ("Update"): those
+   * `updatesToInstall` picks (Core last, never the operating system), each like {@link startInstall}. Stops when Home
+   * Assistant refuses for lack of administrator rights. Returns how many are queued.
+   */
+  startUpdates(connection: HomeAssistantConnection, ids: readonly number[] | undefined, backup: boolean): number {
+    if (!connection.installEnabled) {
+      throw new InstallBlockedError('Installing from ReleaseWatcher is switched off for this connection – install the updates in Home Assistant.');
+    }
+    if (this.busy.has(connection.id)) {
+      throw new ConnectionBusyError();
+    }
+    const updates = updatesToInstall(this.deps.store.listComponents(connection.id), connection, ids);
+    if (updates.length === 0) {
+      throw new InstallBlockedError('Home Assistant has no update to install from here.');
+    }
+    const run = this.installAll(connection, updates, backup)
+      .catch((err: unknown) => this.deps.log.error({ err, connection: connection.name }, 'Installing Home Assistant updates failed'))
+      .finally(() => {
+        this.busy.delete(connection.id);
+        this.installing.delete(connection.id);
+        this.restarting.delete(connection.id);
+        this.queued.delete(connection.id);
+      });
+    this.busy.set(connection.id, run);
+    this.installing.set(connection.id, updates[0]!.id);
+    this.queued.set(connection.id, updates.length - 1);
+    return updates.length;
+  }
+
+  private async installAll(connection: HomeAssistantConnection, updates: readonly HomeAssistantComponent[], backup: boolean): Promise<void> {
+    const { store, log } = this.deps;
+    for (const [index, planned] of updates.entries()) {
+      this.queued.set(connection.id, updates.length - index - 1);
+      // Read again: an earlier installation re-read the connection, and Home Assistant may no longer offer this one.
+      const component = store.getComponent(planned.id);
+      if (!component?.hasUpdate) continue;
+      this.installing.set(connection.id, component.id);
+      await this.install(connection, component, backup);
+      if (store.getComponent(component.id)?.installError === ADMIN_NEEDED_MESSAGE) {
+        log.warn({ connection: connection.name }, 'Stopped installing Home Assistant updates: an administrator token is needed');
+        break;
+      }
     }
   }
 

@@ -32,6 +32,13 @@ const installSchema = body({
   backup: z.boolean().optional(),
 });
 
+const updateSchema = body({
+  /** Components to install (default: every update that can be installed from here). */
+  ids: z.array(z.int().min(1)).max(1000).optional(),
+  /** Ask Home Assistant for a backup first where the entity supports it. */
+  backup: z.boolean().optional(),
+});
+
 const testSchema = body({
   url: z.string().max(MAX_URL_LENGTH),
   token: z.string().max(MAX_TOKEN_LENGTH).nullish(),
@@ -72,6 +79,7 @@ export function homeAssistantRoutes(deps: HomeAssistantRoutesDeps) {
     isChecking: service.isChecking(c.id),
     isRestarting: service.isRestarting(c.id),
     pendingRestarts: service.pendingRestarts(c.id),
+    queuedUpdates: service.queuedUpdates(c.id),
   });
 
   const overview = () => ({
@@ -205,6 +213,21 @@ export function homeAssistantRoutes(deps: HomeAssistantRoutesDeps) {
         if (!updated) return problem(404, 'Home Assistant no longer has this component.');
         const [view] = service.describe([updated]);
         return Response.json(view);
+      },
+    },
+    // Installs several updates one after another ("Update"; Core last, never the operating system).
+    '/api/home-assistant/connections/:id/update': {
+      POST: async (req: Bun.BunRequest<'/api/home-assistant/connections/:id/update'>) => {
+        const connection = findConnection(req.params.id);
+        const body = await readBody(req, updateSchema);
+        if (!connection) return problem(404, 'Home Assistant connection not found.');
+        try {
+          service.startUpdates(connection, body.ids, body.backup ?? false);
+        } catch (error) {
+          if (error instanceof InstallBlockedError || error instanceof ConnectionBusyError) return problem(409, error.message);
+          throw error;
+        }
+        return Response.json(connectionDto(connection), { status: 202 });
       },
     },
     // Restarts Home Assistant (only with installing switched on for the connection).

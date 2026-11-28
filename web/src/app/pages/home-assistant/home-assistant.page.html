@@ -14,13 +14,44 @@
     }
   </div>
   <div class="header-actions">
-    <button type="button" class="btn btn-secondary" (click)="checkAll()" [disabled]="checkingAll() || overview()?.check?.isRunning">
-      <app-icon name="refresh" [size]="16" [class.spin]="checkingAll() || overview()?.check?.isRunning" />
-      {{ checkingAll() || overview()?.check?.isRunning ? 'Checking…' : 'Check now' }}
-    </button>
-    <a class="btn btn-secondary" routerLink="/settings" [queryParams]="{ tab: 'connections' }">
-      <app-icon name="settings" [size]="16" /> Manage connections
-    </a>
+    @if (picked() !== null) {
+      <span class="confirm-text" aria-live="polite">{{ pickedUpdatable().length }} of {{ updatable().length }} update(s) selected</span>
+      <button type="button" class="btn btn-sm btn-ghost" (click)="togglePickAll()">
+        {{ pickedUpdatable().length === updatable().length ? 'Select none' : 'Select all' }}
+      </button>
+      @if (pickedUpdatable().some(supportsBackup)) {
+        <label class="backup" title="Home Assistant makes a backup first where the component supports it (add-ons)">
+          <input type="checkbox" [checked]="updateBackup()" (change)="updateBackup.set($any($event.target).checked)" /> Backup first
+        </label>
+      }
+      <button type="button" class="btn btn-sm btn-ghost" (click)="picked.set(null)">Cancel</button>
+      <button
+        type="button"
+        class="btn btn-sm"
+        (click)="updatePicked()"
+        [disabled]="pickedUpdatable().length === 0"
+        title="Installs the selected updates one after another – Home Assistant Core last, since it restarts"
+      >
+        <app-icon name="download" [size]="14" /> Update {{ pickedUpdatable().length }}
+      </button>
+    } @else {
+      <button type="button" class="btn btn-secondary" (click)="checkAll()" [disabled]="checkingAll() || overview()?.check?.isRunning">
+        <app-icon name="refresh" [size]="16" [class.spin]="checkingAll() || overview()?.check?.isRunning" />
+        {{ checkingAll() || overview()?.check?.isRunning ? 'Checking…' : 'Check now' }}
+      </button>
+      <button
+        type="button"
+        class="btn btn-secondary"
+        (click)="startPicking()"
+        [disabled]="updatable().length === 0 || anyBusy()"
+        [title]="updatable().length === 0 ? 'No update can be installed from here' : 'Choose updates to install one after another (the operating system is installed on its own)'"
+      >
+        <app-icon name="download" [size]="16" /> Update
+      </button>
+      <a class="btn btn-secondary" routerLink="/settings" [queryParams]="{ tab: 'connections' }">
+        <app-icon name="settings" [size]="16" /> Manage connections
+      </a>
+    }
   </div>
 </header>
 
@@ -84,6 +115,13 @@
               <button type="button" class="btn btn-sm" (click)="restart(card.connection)">Yes</button>
               <button type="button" class="btn btn-sm btn-ghost" (click)="confirmingRestart.set(null)">No</button>
             </span>
+          } @else if (installingOn(card.connection); as current) {
+            <span class="muted small">
+              <app-icon name="refresh" [size]="14" class="spin" /> Installing {{ current.name }}…
+              @if (card.connection.queuedUpdates > 0) {
+                ({{ card.connection.queuedUpdates }} more)
+              }
+            </span>
           } @else if (card.connection.isChecking) {
             <span class="muted small"><app-icon name="refresh" [size]="14" class="spin" /> Checking…</span>
           } @else if (card.connection.lastCheckedAt) {
@@ -133,6 +171,15 @@
       } @else {
         @for (c of card.components; track c.id) {
           <div class="row">
+            @if (picked() !== null && isUpdatable(c)) {
+              <input
+                type="checkbox"
+                class="pick"
+                [checked]="picked()!.has(c.id)"
+                (change)="togglePick(c.id)"
+                [attr.aria-label]="'Update ' + c.name"
+              />
+            }
             <span class="name" [title]="c.entityId">{{ c.name }}</span>
             @if (c.repository; as repo) {
               <a
@@ -205,7 +252,7 @@
                 <app-icon name="refresh" [size]="14" [class.spin]="refreshing().has(c.id)" />
                 {{ refreshing().has(c.id) ? 'Checking…' : 'Check in Home Assistant' }}
               </button>
-            } @else if (canInstall(c)) {
+            } @else if (canInstall(c) && picked() === null) {
               <button type="button" class="btn btn-sm" (click)="askInstall(c)" [title]="'Install ' + c.latestVersion + ' in Home Assistant'">
                 <app-icon name="download" [size]="14" /> Install
               </button>
