@@ -718,6 +718,34 @@ describe('Home Assistant connections: API', () => {
     assert.equal((await request('POST', `/api/home-assistant/components/${before.id}/refresh`)).status, 502);
   });
 
+  it('asks Home Assistant about newer releases before "Check now", with installing switched on only', async () => {
+    source.releases = [release('v7.2.0', 4), release('v7.0.1', 2)];
+    states = [
+      update('update.button_card_update', { title: 'Button Card', installed_version: 'v7.0.1', latest_version: 'v7.0.1', release_url: 'https://github.com/custom-cards/button-card/releases/tag/v7.0.1' }),
+      update('update.other_card_update', { title: 'Other Card', installed_version: 'v1.0.0', latest_version: 'v1.0.0', release_url: 'https://github.com/owner/old-card/releases/tag/v1.0.0' }),
+    ];
+    hacsEntities.set('update.button_card_update', '146194325');
+    await watch('custom-cards/button-card');
+    const { body: connection } = await addConnection();
+    newerInHomeAssistant = 'v7.2.0';
+    await recheck();
+    assert.deepEqual(hacsRefreshed, []);
+    assert.equal((await component('Button Card')).homeAssistantUpdate, false);
+
+    await request('PUT', `/api/home-assistant/connections/${connection.id}`, { name: 'Home', url: HA_URL, installEnabled: true });
+    await app.homeAssistant.idle();
+    assert.deepEqual(hacsRefreshed, []); // saving the connection only reads it
+    await recheck();
+    // Only the component whose watched repository is ahead – the other one is not watched.
+    assert.deepEqual(hacsRefreshed, ['146194325']);
+    assert.deepEqual(refreshed, []);
+    assert.equal((await component('Button Card')).homeAssistantUpdate, true);
+
+    // Now Home Assistant knows it: nothing to ask the next time.
+    await recheck();
+    assert.deepEqual(hacsRefreshed, ['146194325']);
+  });
+
   it('refreshes a marketplace entry there, as "Update information" does', async () => {
     source.releases = [release('v7.2.0', 4), release('v7.0.1', 2)];
     states = [update('update.button_card_update', { title: 'Button Card', installed_version: 'v7.0.1', latest_version: 'v7.0.1', release_url: 'https://github.com/custom-cards/button-card/releases/tag/v7.0.1' })];

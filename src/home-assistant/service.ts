@@ -53,6 +53,9 @@ export const ADMIN_NEEDED_REFRESH_MESSAGE =
 export const ADMIN_NEEDED_RESTART_MESSAGE =
   'Home Assistant refused to restart – that needs the access token of a user with administrator rights.';
 
+/** Components a check asks Home Assistant about at most (each refresh makes Home Assistant ask GitHub). */
+const MAX_ASKED_PER_CHECK = 10;
+
 /** Home Assistant may take this long to answer again after a restart. */
 const RESTART_TIMEOUT_MS = 10 * 60_000;
 /** Looks at a restarting Home Assistant that still answers before it is taken as "already back". */
@@ -123,12 +126,15 @@ export class HomeAssistantService {
     return componentsFromStates(await api.states());
   }
 
-  /** Starts a check of the connection in the background (see {@link check}). */
-  startCheck(connection: HomeAssistantConnection): void {
+  /**
+   * Starts a check of the connection in the background (see {@link check}); `askFirst` for "Check now" (see
+   * {@link askForNewReleases}).
+   */
+  startCheck(connection: HomeAssistantConnection, askFirst = false): void {
     if (this.busy.has(connection.id)) {
       throw new ConnectionBusyError();
     }
-    const run = this.check(connection)
+    const run = (askFirst ? this.askForNewReleases(connection) : Promise.resolve()).then(() => this.check(connection))
       .catch((err: unknown) => this.deps.log.error({ err, connection: connection.name }, 'Home Assistant check failed'))
       .finally(() => this.busy.delete(connection.id));
     this.busy.set(connection.id, run);
@@ -256,11 +262,7 @@ export class HomeAssistantService {
     let done!: () => void;
     this.busy.set(connection.id, new Promise<void>((resolve) => (done = resolve)));
     try {
-      const timeoutMs = 120_000;
-      const viaStore = await refreshRepositoryEntity(connection, component.entityId, { timeoutMs, ...(this.deps.socket ? { socket: this.deps.socket } : {}) });
-      if (!viaStore) {
-        await new HomeAssistantApi(connection, this.deps.fetch).updateEntity(component.entityId, timeoutMs);
-      }
+      await this.askToLook(connection, component.entityId);
     } catch (error) {
       if (error instanceof HomeAssistantApiError && error.unauthorized) {
         throw new HomeAssistantApiError(ADMIN_NEEDED_REFRESH_MESSAGE);
@@ -329,13 +331,44 @@ export class HomeAssistantService {
     }
   }
 
-  /** Scheduled run: every enabled connection. */
+  /** Scheduled run and "Check now" for all: every enabled connection, asking about new releases first. */
   async checkAll(signal?: AbortSignal): Promise<void> {
     for (const connection of this.deps.store.listConnections()) {
       if (signal?.aborted) return;
       if (connection.isEnabled && !this.busy.has(connection.id)) {
+        await this.askForNewReleases(connection);
         await this.check(connection);
       }
+    }
+  }
+
+  /**
+   * Before a check: asks Home Assistant to look for the new version of the components whose watched repository has a
+   * newer release than Home Assistant reports (see {@link refresh}), so the check finds it to install. Only with
+   * installing switched on (refreshing marketplace entries is admin-only), at most {@link MAX_ASKED_PER_CHECK} per check.
+   * Never fails the check.
+   */
+  private async askForNewReleases(connection: HomeAssistantConnection): Promise<void> {
+    if (!connection.installEnabled) return;
+    const stale = this.describe(this.deps.store.listComponents(connection.id))
+      .filter((c) => c.updateAvailable === true && !c.homeAssistantUpdate)
+      .slice(0, MAX_ASKED_PER_CHECK);
+    for (const component of stale) {
+      try {
+        await this.askToLook(connection, component.entityId);
+      } catch (error) {
+        this.deps.log.warn({ connection: connection.name, component: component.name, error: errorMessage(error) }, 'Asking Home Assistant about a new release failed');
+        if (error instanceof HomeAssistantApiError && error.unauthorized) return;
+      }
+    }
+  }
+
+  /** Marketplace (or HACS) entries are refreshed there, any other entity through `homeassistant.update_entity`. */
+  private async askToLook(connection: HomeAssistantConnection, entityId: string): Promise<void> {
+    const timeoutMs = 120_000;
+    const viaStore = await refreshRepositoryEntity(connection, entityId, { timeoutMs, ...(this.deps.socket ? { socket: this.deps.socket } : {}) });
+    if (!viaStore) {
+      await new HomeAssistantApi(connection, this.deps.fetch).updateEntity(entityId, timeoutMs);
     }
   }
 

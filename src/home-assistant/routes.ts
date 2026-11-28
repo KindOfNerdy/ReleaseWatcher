@@ -225,7 +225,7 @@ export function homeAssistantRoutes(deps: HomeAssistantRoutesDeps) {
         const connection = findConnection(req.params.id);
         if (!connection) return problem(404, 'Home Assistant connection not found.');
         try {
-          service.startCheck(connection);
+          service.startCheck(connection, true);
         } catch (error) {
           if (error instanceof ConnectionBusyError) return problem(409, error.message);
           throw error;
