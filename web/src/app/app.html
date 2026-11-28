@@ -45,15 +45,16 @@
                 class="nav-item"
                 [attr.data-page]="item.id"
                 [class.dragging]="draggingId() === item.id"
+                [class.hidden-page]="navigation.isHidden(item.id)"
                 [style.--i]="i"
                 [style.translate]="draggingId() === item.id ? '0 ' + dragOffset() + 'px' : null"
-                [attr.aria-label]="item.label + ', position ' + (i + 1) + ' of ' + navigation.pages().length + (i === 0 ? ', start page' : '') + '. Move with the arrow keys.'"
+                [attr.aria-label]="item.label + ', position ' + (i + 1) + ' of ' + navigation.pages().length + (item.id === navigation.home() ? ', start page' : '') + (navigation.isHidden(item.id) ? ', hidden' : '') + '. Move with the arrow keys.'"
                 (pointerdown)="startDrag($event, item.id)"
                 (keydown)="moveByKey($event, i)"
               >
                 <app-icon [name]="item.icon" />
                 <span>{{ item.label }}</span>
-                @if (i === 0) {
+                @if (item.id === navigation.home()) {
                   <span class="home-mark" title="Start page"><app-icon name="home" [size]="14" /></span>
                 }
                 <app-icon class="grip" name="grip" [size]="16" />
@@ -63,7 +64,7 @@
         </ol>
         <span class="visually-hidden" aria-live="polite">{{ moveAnnouncement() }}</span>
       } @else {
-        @for (item of navigation.pages(); track item.id) {
+        @for (item of navigation.visiblePages(); track item.id) {
           <a [routerLink]="'/' + item.id" routerLinkActive="active" #rla="routerLinkActive" [attr.aria-current]="rla.isActive ? 'page' : null">
             <app-icon [name]="item.icon" />
             <span>{{ item.label }}</span>

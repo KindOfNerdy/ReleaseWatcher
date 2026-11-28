@@ -166,6 +166,12 @@ nav {
     transition: none;
   }
 
+  /* Hidden from the sidebar: still listed here so it keeps its place in the order. */
+  &.hidden-page > span,
+  &.hidden-page > app-icon:not(.grip) {
+    opacity: 0.45;
+  }
+
   .home-mark {
     display: inline-flex;
     color: var(--accent-strong);

@@ -27,3 +27,15 @@ export function normalizeNavOrder(value: unknown): NavPageId[] {
     : [];
   return [...known, ...DEFAULT_NAV_ORDER.filter((id) => !known.includes(id))];
 }
+
+/** Settings cannot be hidden: it is where pages are shown again. */
+export const ALWAYS_SHOWN: NavPageId = 'settings';
+
+/** Saved hidden pages cleaned up: known pages only, once each, never Settings. */
+export function normalizeHiddenPages(value: unknown): NavPageId[] {
+  return Array.isArray(value)
+    ? value.filter(
+        (id, i): id is NavPageId => DEFAULT_NAV_ORDER.includes(id) && id !== ALWAYS_SHOWN && value.indexOf(id) === i,
+      )
+    : [];
+}

@@ -2,7 +2,7 @@ import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Route, Router, provideRouter } from '@angular/router';
 import { routes } from '../app.routes';
-import { DEFAULT_NAV_ORDER, normalizeNavOrder } from './nav-pages';
+import { DEFAULT_NAV_ORDER, normalizeHiddenPages, normalizeNavOrder } from './nav-pages';
 import { NavigationService } from './navigation';
 import { PreferencesService } from './preferences.service';
 
@@ -39,6 +39,13 @@ describe('normalizeNavOrder', () => {
   });
 });
 
+describe('normalizeHiddenPages', () => {
+  it('keeps known pages once and never Settings', () => {
+    expect(normalizeHiddenPages(['machines', 'nope', 'machines', 'settings'])).toEqual(['machines']);
+    expect(normalizeHiddenPages('machines')).toEqual([]);
+  });
+});
+
 describe('NavigationService', () => {
   beforeEach(() => localStorage.removeItem(STORAGE_KEY));
 
@@ -63,6 +70,22 @@ describe('NavigationService', () => {
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}').navOrder[0]).toBe('docker');
 
     navigation.reset();
+    expect(navigation.home()).toBe('repositories');
+  });
+
+  it('hides pages from the sidebar, never Settings, and starts on the first page shown', () => {
+    const navigation = TestBed.inject(NavigationService);
+    navigation.toggleHidden('repositories');
+    navigation.toggleHidden('machines');
+    navigation.toggleHidden('settings');
+    TestBed.tick();
+    expect(navigation.visiblePages().map((p) => p.id)).toEqual(['docker', 'home-assistant', 'vulnerabilities', 'settings']);
+    // Still in the order, so it keeps its place when shown again.
+    expect(navigation.pages()).toHaveLength(6);
+    expect(navigation.home()).toBe('docker');
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}').hiddenPages).toEqual(['repositories', 'machines']);
+
+    navigation.toggleHidden('repositories');
     expect(navigation.home()).toBe('repositories');
   });
 

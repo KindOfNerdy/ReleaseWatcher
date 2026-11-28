@@ -1,6 +1,6 @@
 import { DOCUMENT } from '@angular/common';
 import { Injectable, effect, inject, signal } from '@angular/core';
-import { DEFAULT_NAV_ORDER, NavPageId, normalizeNavOrder } from './nav-pages';
+import { DEFAULT_NAV_ORDER, NavPageId, normalizeHiddenPages, normalizeNavOrder } from './nav-pages';
 
 export type RepositoryLayout = 'list' | 'grid';
 /** Grouping of the repositories list. */
@@ -28,6 +28,8 @@ interface Preferences {
   accent: AccentColor;
   /** Order of the sidebar pages; the first one is the start page. */
   navOrder: NavPageId[];
+  /** Pages left out of the sidebar (still reachable by their address). */
+  hiddenPages: NavPageId[];
 }
 
 const DEFAULTS: Preferences = {
@@ -38,6 +40,7 @@ const DEFAULTS: Preferences = {
   theme: 'system',
   accent: 'indigo',
   navOrder: [...DEFAULT_NAV_ORDER],
+  hiddenPages: [],
 };
 const CONTAINER_SORTS: readonly ContainerSort[] = ['attention', 'vmid', 'name'];
 const REPOSITORY_GROUPINGS: readonly RepositoryGrouping[] = ['none', 'owner', 'custom'];
@@ -54,6 +57,7 @@ export class PreferencesService {
   readonly theme = signal<ThemeMode>(this.initial.theme);
   readonly accent = signal<AccentColor>(this.initial.accent);
   readonly navOrder = signal<NavPageId[]>(this.initial.navOrder);
+  readonly hiddenPages = signal<NavPageId[]>(this.initial.hiddenPages);
 
   constructor() {
     effect(() =>
@@ -65,6 +69,7 @@ export class PreferencesService {
         theme: this.theme(),
         accent: this.accent(),
         navOrder: this.navOrder(),
+        hiddenPages: this.hiddenPages(),
       }),
     );
     effect(() => applyAppearance(this.document, this.theme(), this.accent()));
@@ -96,6 +101,7 @@ function load(): Preferences {
       theme: oneOf(THEME_MODES, stored.theme, DEFAULTS.theme),
       accent: oneOf(ACCENTS, stored.accent, DEFAULTS.accent),
       navOrder: normalizeNavOrder(stored.navOrder),
+      hiddenPages: normalizeHiddenPages(stored.hiddenPages),
     };
   } catch {
     return DEFAULTS;

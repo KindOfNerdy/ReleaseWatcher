@@ -249,6 +249,19 @@
   .badge {
     margin-left: auto;
   }
+
+  .badge + .visibility {
+    margin-left: 0;
+  }
+
+  .visibility {
+    margin-left: auto;
+  }
+
+  .hidden-page > span:not(.badge),
+  .hidden-page > app-icon {
+    opacity: 0.5;
+  }
 }
 
 .order-actions {

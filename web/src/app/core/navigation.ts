@@ -1,8 +1,8 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { DEFAULT_NAV_ORDER, NAV_PAGES, NavPage, NavPageId } from './nav-pages';
+import { ALWAYS_SHOWN, DEFAULT_NAV_ORDER, NAV_PAGES, NavPage, NavPageId } from './nav-pages';
 import { PreferencesService } from './preferences.service';
 
-/** Order of the sidebar pages (saved per browser) and the sidebar's rearrange mode. */
+/** Order and visibility of the sidebar pages (saved per browser) and the sidebar's rearrange mode. */
 @Injectable({ providedIn: 'root' })
 export class NavigationService {
   private readonly preferences = inject(PreferencesService);
@@ -12,8 +12,13 @@ export class NavigationService {
   readonly pages = computed(() =>
     this.preferences.navOrder().map((id) => NAV_PAGES.find((p) => p.id === id) as NavPage),
   );
-  /** Where `/` (and signing in without a return URL) leads: the first page of the sidebar. */
-  readonly home = computed(() => this.preferences.navOrder()[0] ?? DEFAULT_NAV_ORDER[0]);
+  /** The pages shown in the sidebar: all but the hidden ones, in order. */
+  readonly visiblePages = computed(() => {
+    const hidden = this.preferences.hiddenPages();
+    return this.pages().filter((p) => !hidden.includes(p.id));
+  });
+  /** Where `/` (and signing in without a return URL) leads: the first page shown in the sidebar. */
+  readonly home = computed(() => this.visiblePages()[0]?.id ?? DEFAULT_NAV_ORDER[0]);
   readonly isDefault = computed(() =>
     this.preferences.navOrder().every((id, i) => id === DEFAULT_NAV_ORDER[i]),
   );
@@ -26,6 +31,18 @@ export class NavigationService {
     const [id] = order.splice(from, 1);
     order.splice(target, 0, id as NavPageId);
     this.preferences.navOrder.set(order);
+  }
+
+  isHidden(id: NavPageId): boolean {
+    return this.preferences.hiddenPages().includes(id);
+  }
+
+  /** Hides a page from the sidebar or shows it again (Settings always stays). */
+  toggleHidden(id: NavPageId): void {
+    if (id === ALWAYS_SHOWN) return;
+    this.preferences.hiddenPages.update((hidden) =>
+      hidden.includes(id) ? hidden.filter((h) => h !== id) : [...hidden, id],
+    );
   }
 
   reset(): void {
