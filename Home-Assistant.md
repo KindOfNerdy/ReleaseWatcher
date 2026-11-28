@@ -27,7 +27,7 @@ and with **Check now** on the page. Switch **Check on schedule** off in a connec
 
 Per connection: `GET /api/config`, then `GET /api/states`. While Home Assistant is still starting (its state is not
 `RUNNING`), nothing is stored and the components read before are kept – the integrations and their update entities are
-not loaded yet then. Every `update.*` entity whose `release_url` names a repository becomes
+not loaded yet then. Every `update.*` entity Home Assistant can install whose `release_url` names a repository becomes
 a component with its installed version, the newest version Home Assistant knows of and whether Home Assistant reports
 an update (its state is `on` – a newer pre-release or a skipped version is no update).
 
@@ -40,6 +40,8 @@ an update (its state is `on` – a newer pre-release or a skipped version is no 
 Left out:
 
 - entities without a link – mostly device firmware,
+- entities Home Assistant only announces and cannot install – integrations that report the version of a server running
+  elsewhere (Immich, ntfy, Uptime Kuma …); watch that server's repository with its own installed version instead,
 - links to a file in a repository – blueprints and add-ons from a collection repository (their version is not a
   release of that repository),
 - release notes pages and gists.
